@@ -62,7 +62,7 @@ final class JsonCrawler implements JsonCrawlerInterface
 
             if (\is_resource($this->raw)) {
                 if (!class_exists(Splitter::class)) {
-                    throw new \LogicException('The JsonEncoder package is required to evaluate a path against a resource. Try running "composer require symfony/json-streamer".');
+                    throw new \LogicException('The JsonStreamer package is required to evaluate a path against a resource. Try running "composer require symfony/json-streamer".');
                 }
 
                 $simplified = JsonPathUtils::findSmallestDeserializableStringAndPath(

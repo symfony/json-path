@@ -34,7 +34,7 @@ class JsonPathTokenizerTest extends TestCase
         }
     }
 
-    public function simplePathProvider(): array
+    public static function simplePathProvider(): array
     {
         return [
             'root only' => [
@@ -77,7 +77,7 @@ class JsonPathTokenizerTest extends TestCase
         }
     }
 
-    public function bracketNotationProvider(): array
+    public static function bracketNotationProvider(): array
     {
         return [
             'bracket with quotes' => [
@@ -117,7 +117,7 @@ class JsonPathTokenizerTest extends TestCase
         }
     }
 
-    public function filterExpressionProvider(): array
+    public static function filterExpressionProvider(): array
     {
         return [
             'simple filter' => [
@@ -162,7 +162,7 @@ class JsonPathTokenizerTest extends TestCase
         }
     }
 
-    public function complexPathProvider(): array
+    public static function complexPathProvider(): array
     {
         return [
             'mixed with recursive' => [

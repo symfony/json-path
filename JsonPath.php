@@ -43,9 +43,19 @@ final class JsonPath
         return new self($this->path.'..');
     }
 
-    public function anyIndex(): static
+    public function all(): static
     {
         return new self($this->path.'[*]');
+    }
+
+    public function first(): static
+    {
+        return new self($this->path.'[0]');
+    }
+
+    public function last(): static
+    {
+        return new self($this->path.'[-1]');
     }
 
     public function slice(int $start, ?int $end = null, ?int $step = null): static

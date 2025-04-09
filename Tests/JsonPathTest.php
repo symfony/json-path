@@ -35,4 +35,31 @@ class JsonPathTest extends TestCase
 
         $this->assertSame('$.users[?(@.age > 18)]', (string) $path);
     }
+
+    public function testAll()
+    {
+        $path = new JsonPath();
+        $path = $path->key('users')
+            ->all();
+
+        $this->assertSame('$.users[*]', (string) $path);
+    }
+
+    public function testFirst()
+    {
+        $path = new JsonPath();
+        $path = $path->key('users')
+            ->first();
+
+        $this->assertSame('$.users[0]', (string) $path);
+    }
+
+    public function testLast()
+    {
+        $path = new JsonPath();
+        $path = $path->key('users')
+            ->last();
+
+        $this->assertSame('$.users[-1]', (string) $path);
+    }
 }

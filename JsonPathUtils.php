@@ -11,10 +11,10 @@
 
 namespace Symfony\Component\JsonPath;
 
-use Symfony\Component\JsonStreamer\Read\Splitter;
 use Symfony\Component\JsonPath\Exception\InvalidArgumentException;
 use Symfony\Component\JsonPath\Tokenizer\JsonPathToken;
 use Symfony\Component\JsonPath\Tokenizer\TokenType;
+use Symfony\Component\JsonStreamer\Read\Splitter;
 
 /**
  * Get the smallest deserializable JSON string from a list of tokens that doesn't need any processing.

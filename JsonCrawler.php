@@ -80,24 +80,29 @@ final class JsonCrawler implements JsonCrawlerInterface
                 throw new InvalidJsonStringInputException($e->getMessage(), $e);
             }
 
-            $current = [$data];
-
-            foreach ($tokens as $token) {
-                $next = [];
-                foreach ($current as $value) {
-                    $result = $this->evaluateToken($token, $value);
-                    $next = array_merge($next, $result);
-                }
-
-                $current = $next;
-            }
-
-            return $current;
+            return $this->evaluateTokensOnDecodedData($tokens, $data);
         } catch (InvalidArgumentException $e) {
             throw $e;
         } catch (\Throwable $e) {
             throw new JsonCrawlerException($query, $e->getMessage(), previous: $e);
         }
+    }
+
+    private function evaluateTokensOnDecodedData(array $tokens, array $data): array
+    {
+        $current = [$data];
+
+        foreach ($tokens as $token) {
+            $next = [];
+            foreach ($current as $value) {
+                $result = $this->evaluateToken($token, $value);
+                $next = array_merge($next, $result);
+            }
+
+            $current = $next;
+        }
+
+        return $current;
     }
 
     private function evaluateToken(JsonPathToken $token, mixed $value): array
@@ -246,10 +251,6 @@ final class JsonCrawler implements JsonCrawlerInterface
 
         $result = [];
         foreach ($value as $item) {
-            if (!\is_array($item)) {
-                continue;
-            }
-
             if ($this->evaluateFilterExpression($expr, $item)) {
                 $result[] = $item;
             }
@@ -258,7 +259,7 @@ final class JsonCrawler implements JsonCrawlerInterface
         return $result;
     }
 
-    private function evaluateFilterExpression(string $expr, array $context): bool
+    private function evaluateFilterExpression(string $expr, mixed $context): bool
     {
         $expr = trim($expr);
 
@@ -294,10 +295,12 @@ final class JsonCrawler implements JsonCrawlerInterface
             }
         }
 
-        if (str_starts_with($expr, '@.')) {
-            $path = substr($expr, 2);
+        if ('@' === $expr) {
+            return true;
+        }
 
-            return \array_key_exists($path, $context);
+        if (str_starts_with($expr, '@.')) {
+            return (bool) ($this->evaluateTokensOnDecodedData(JsonPathTokenizer::tokenize(new JsonPath('$'.substr($expr, 1))), $context)[0] ?? false);
         }
 
         // function calls
@@ -315,10 +318,14 @@ final class JsonCrawler implements JsonCrawlerInterface
         return false;
     }
 
-    private function evaluateScalar(string $expr, array $context): mixed
+    private function evaluateScalar(string $expr, mixed $context): mixed
     {
         if (is_numeric($expr)) {
             return str_contains($expr, '.') ? (float) $expr : (int) $expr;
+        }
+
+        if ('@' === $expr) {
+            return $context;
         }
 
         if ('true' === $expr) {
@@ -339,10 +346,12 @@ final class JsonCrawler implements JsonCrawlerInterface
         }
 
         // current node references
-        if (str_starts_with($expr, '@.')) {
-            $path = substr($expr, 2);
+        if (str_starts_with($expr, '@')) {
+            if (!\is_array($context)) {
+                return null;
+            }
 
-            return $context[$path] ?? null;
+            return $this->evaluateTokensOnDecodedData(JsonPathTokenizer::tokenize(new JsonPath('$'.substr($expr, 1))), $context)[0] ?? null;
         }
 
         // function calls

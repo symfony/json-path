@@ -20,7 +20,7 @@
         "symfony/polyfill-mbstring": "~1.0"
     },
     "require-dev": {
-        "symfony/json-streamer": "^7.3"
+        "symfony/json-streamer": "^7.3|^8.0"
     },
     "autoload": {
         "psr-4": { "Symfony\\Component\\JsonPath\\": "" },

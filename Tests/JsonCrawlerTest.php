@@ -465,6 +465,251 @@ JSON);
         $this->assertSame(['a' => 1, 'b' => 2], $result[0]);
     }
 
+    /**
+     * @dataProvider provideUnicodeEscapeSequencesProvider
+     */
+    public function testUnicodeEscapeSequences(string $jsonPath, array $expected)
+    {
+        $this->assertSame($expected, self::getUnicodeDocumentCrawler()->find($jsonPath));
+    }
+
+    public static function provideUnicodeEscapeSequencesProvider(): array
+    {
+        return [
+            [
+                '$["caf\u00e9"]',
+                ['coffee'],
+            ],
+            [
+                '$["\u65e5\u672c"]',
+                ['Japan'],
+            ],
+            [
+                '$["M\u00fcller"]',
+                [],
+            ],
+            [
+                '$["emoji\ud83d\ude00"]',
+                ['smiley'],
+            ],
+            [
+                '$["tab\there"]',
+                ['with tab'],
+            ],
+            [
+                '$["new\nline"]',
+                ['with newline'],
+            ],
+            [
+                '$["quote\"here"]',
+                ['with quote'],
+            ],
+            [
+                '$["backslash\\\\here"]',
+                ['with backslash'],
+            ],
+            [
+                '$["apostrophe\'here"]',
+                ['with apostrophe'],
+            ],
+            [
+                '$["control\u0001char"]',
+                ['with control char'],
+            ],
+            [
+                '$["\u0063af\u00e9"]',
+                ['coffee'],
+            ],
+        ];
+    }
+
+    /**
+     * @dataProvider provideSingleQuotedStringProvider
+     */
+    public function testSingleQuotedStrings(string $jsonPath, array $expected)
+    {
+        $this->assertSame($expected, self::getUnicodeDocumentCrawler()->find($jsonPath));
+    }
+
+    public static function provideSingleQuotedStringProvider(): array
+    {
+        return [
+            [
+                "$['caf\\u00e9']",
+                ['coffee'],
+            ],
+            [
+                "$['\\u65e5\\u672c']",
+                ['Japan'],
+            ],
+            [
+                "$['quote\"here']",
+                ['with quote'],
+            ],
+            [
+                "$['M\\u00fcller']",
+                [],
+            ],
+            [
+                "$['emoji\\ud83d\\ude00']",
+                ['smiley'],
+            ],
+            [
+                "$['tab\\there']",
+                ['with tab'],
+            ],
+            [
+                "$['quote\\\"here']",
+                ['with quote'],
+            ],
+            [
+                "$['backslash\\\\here']",
+                ['with backslash'],
+            ],
+            [
+                "$['apostrophe\\'here']",
+                ['with apostrophe'],
+            ],
+            [
+                "$['control\\u0001char']",
+                ['with control char'],
+            ],
+            [
+                "$['\\u0063af\\u00e9']",
+                ['coffee'],
+            ],
+        ];
+    }
+
+    /**
+     * @dataProvider provideFilterWithUnicodeProvider
+     */
+    public function testFilterWithUnicodeStrings(string $jsonPath, int $expectedCount, string $expectedCountry)
+    {
+        $result = self::getUnicodeDocumentCrawler()->find($jsonPath);
+
+        $this->assertCount($expectedCount, $result);
+
+        if ($expectedCount > 0) {
+            $this->assertSame($expectedCountry, $result[0]['country']);
+        }
+    }
+
+    public static function provideFilterWithUnicodeProvider(): array
+    {
+        return [
+            [
+                '$.users[?(@.name == "caf\u00e9")]',
+                1,
+                'France',
+            ],
+            [
+                '$.users[?(@.name == "\u65e5\u672c\u592a\u90ce")]',
+                1,
+                'Japan',
+            ],
+            [
+                '$.users[?(@.name == "Jos\u00e9")]',
+                1,
+                'Spain',
+            ],
+            [
+                '$.users[?(@.name == "John")]',
+                1,
+                'USA',
+            ],
+            [
+                '$.users[?(@.name == "NonExistent\u0020Name")]',
+                0,
+                '',
+            ],
+        ];
+    }
+
+    /**
+     * @dataProvider provideInvalidUnicodeSequenceProvider
+     */
+    public function testInvalidUnicodeSequencesAreProcessedAsLiterals(string $jsonPath)
+    {
+        $this->assertIsArray(self::getUnicodeDocumentCrawler()->find($jsonPath), 'invalid unicode sequence should be treated as literal and not throw');
+    }
+
+    public static function provideInvalidUnicodeSequenceProvider(): array
+    {
+        return [
+            [
+                '$["test\uZZZZ"]',
+            ],
+            [
+                '$["test\u123"]',
+            ],
+            [
+                '$["test\u"]',
+            ],
+        ];
+    }
+
+    /**
+     * @dataProvider provideComplexUnicodePath
+     */
+    public function testComplexUnicodePaths(string $jsonPath, array $expected)
+    {
+        $complexJson = [
+            'データ' => [
+                'ユーザー' => [
+                    ['名前' => 'テスト', 'ID' => 1],
+                    ['名前' => 'サンプル', 'ID' => 2],
+                ],
+            ],
+            'special🔑' => [
+                'value💎' => 'treasure',
+            ],
+        ];
+
+        $crawler = new JsonCrawler(json_encode($complexJson));
+
+        $this->assertSame($expected, $crawler->find($jsonPath));
+    }
+
+    public static function provideComplexUnicodePath(): array
+    {
+        return [
+            [
+                '$["\u30c7\u30fc\u30bf"]["\u30e6\u30fc\u30b6\u30fc"][0]["\u540d\u524d"]',
+                ['テスト'],
+            ],
+            [
+                '$["special\ud83d\udd11"]["value\ud83d\udc8e"]',
+                ['treasure'],
+            ],
+            [
+                '$["\u30c7\u30fc\u30bf"]["\u30e6\u30fc\u30b6\u30fc"][*]["\u540d\u524d"]',
+                ['テスト', 'サンプル'],
+            ],
+        ];
+    }
+
+    public function testSurrogatePairHandling()
+    {
+        $json = ['𝒽𝑒𝓁𝓁𝑜' => 'mathematical script hello'];
+        $crawler = new JsonCrawler(json_encode($json));
+
+        // mathematical script "hello" requires surrogate pairs for each character
+        $result = $crawler->find('$["\ud835\udcbd\ud835\udc52\ud835\udcc1\ud835\udcc1\ud835\udc5c"]');
+        $this->assertSame(['mathematical script hello'], $result);
+    }
+
+    public function testMixedQuoteTypes()
+    {
+        $json = ['key"with"quotes' => 'value1', "key'with'apostrophes" => 'value2'];
+        $crawler = new JsonCrawler(json_encode($json));
+
+        $result = $crawler->find('$[\'key"with"quotes\']');
+        $this->assertSame(['value1'], $result);
+
+        $result = $crawler->find('$["key\'with\'apostrophes"]');
+        $this->assertSame(['value2'], $result);
+    }
 
     private static function getBookstoreCrawler(): JsonCrawler
     {
@@ -514,5 +759,29 @@ JSON);
         return new JsonCrawler(<<<JSON
 {"a": [3, 5, 1, 2, 4, 6]}
 JSON);
+    }
+
+    private static function getUnicodeDocumentCrawler(): JsonCrawler
+    {
+        $json = [
+            'café' => 'coffee',
+            '日本' => 'Japan',
+            'emoji😀' => 'smiley',
+            'tab	here' => 'with tab',
+            "new\nline" => 'with newline',
+            'quote"here' => 'with quote',
+            'backslash\\here' => 'with backslash',
+            'apostrophe\'here' => 'with apostrophe',
+            "control\x01char" => 'with control char',
+            'users' => [
+                ['name' => 'café', 'country' => 'France'],
+                ['name' => '日本太郎', 'country' => 'Japan'],
+                ['name' => 'John', 'country' => 'USA'],
+                ['name' => 'Müller', 'country' => 'Germany'],
+                ['name' => 'José', 'country' => 'Spain'],
+            ],
+        ];
+
+        return new JsonCrawler(json_encode($json));
     }
 }

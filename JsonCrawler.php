@@ -228,7 +228,56 @@ final class JsonCrawler implements JsonCrawlerInterface
             return $this->evaluateFilter($innerExpr, $value);
         }
 
-        // quoted strings for object keys
+        // comma-separated values, e.g. `['key1', 'key2', 123]` or `[0, 1, 'key']`
+        if (str_contains($expr, ',')) {
+            $parts = $this->parseCommaSeparatedValues($expr);
+
+            $result = [];
+            $keysIndices = array_keys($value);
+            $isList = array_is_list($value);
+
+            foreach ($parts as $part) {
+                $part = trim($part);
+
+                if (preg_match('/^([\'"])(.*)\1$/', $part, $matches)) {
+                    $key = JsonPathUtils::unescapeString($matches[2], $matches[1]);
+
+                    if ($isList) {
+                        foreach ($value as $item) {
+                            if (\is_array($item) && \array_key_exists($key, $item)) {
+                                $result[] = $item;
+                                break;
+                            }
+                        }
+
+                        continue; // no results here
+                    }
+
+                    if (\array_key_exists($key, $value)) {
+                        $result[] = $value[$key];
+                    }
+                } elseif (preg_match('/^-?\d+$/', $part)) {
+                    // numeric index
+                    $index = (int) $part;
+                    if ($index < 0) {
+                        $index = \count($value) + $index;
+                    }
+
+                    if ($isList && \array_key_exists($index, $value)) {
+                        $result[] = $value[$index];
+                        continue;
+                    }
+
+                    // numeric index on a hashmap
+                    if (isset($keysIndices[$index]) && isset($value[$keysIndices[$index]])) {
+                        $result[] = $value[$keysIndices[$index]];
+                    }
+                }
+            }
+
+            return $result;
+        }
+
         if (preg_match('/^([\'"])(.*)\1$/', $expr, $matches)) {
             $key = JsonPathUtils::unescapeString($matches[2], $matches[1]);
 
@@ -414,5 +463,45 @@ final class JsonCrawler implements JsonCrawlerInterface
             '<=' => $left <= $right,
             default => false,
         };
+    }
+
+    private function parseCommaSeparatedValues(string $expr): array
+    {
+        $parts = [];
+        $current = '';
+        $inQuotes = false;
+        $quoteChar = null;
+
+        for ($i = 0; $i < \strlen($expr); ++$i) {
+            $char = $expr[$i];
+
+            if ('\\' === $char && $i + 1 < \strlen($expr)) {
+                $current .= $char.$expr[++$i];
+                continue;
+            }
+
+            if ('"' === $char || "'" === $char) {
+                if (!$inQuotes) {
+                    $inQuotes = true;
+                    $quoteChar = $char;
+                } elseif ($char === $quoteChar) {
+                    $inQuotes = false;
+                    $quoteChar = null;
+                }
+            } elseif (!$inQuotes && ',' === $char) {
+                $parts[] = trim($current);
+                $current = '';
+
+                continue;
+            }
+
+            $current .= $char;
+        }
+
+        if ('' !== $current) {
+            $parts[] = trim($current);
+        }
+
+        return $parts;
     }
 }

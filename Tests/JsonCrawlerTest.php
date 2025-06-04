@@ -91,6 +91,35 @@ JSON);
         $this->assertSame(42, $result[0]);
     }
 
+    public function testMultipleKeysAtOnce()
+    {
+        $crawler = new JsonCrawler(<<<JSON
+{"a": {"b\\"c": 42}, "b": {"c": 43}}
+JSON);
+
+        $result = $crawler->find("$['a', 'b', 3]");
+
+        $this->assertSame([
+            ['b"c' => 42],
+            ['c' => 43],
+        ], $result);
+    }
+
+    public function testMultipleKeysAtOnceOnArray()
+    {
+        $crawler = new JsonCrawler(<<<JSON
+[{"a": 1}, {"b": 2}, {"c": 3}, {"a,b,c":  5}, {"d": 4}]
+JSON);
+
+        $result = $crawler->find("$[0, 2, 'a,b,c', -1]");
+
+        $this->assertCount(4, $result);
+        $this->assertSame(['a' => 1], $result[0]);
+        $this->assertSame(['c' => 3], $result[1]);
+        $this->assertSame(['a,b,c' => 5], $result[2]);
+        $this->assertSame(['d' => 4], $result[3]);
+    }
+
     public function testBasicNameSelector()
     {
         $result = self::getBookstoreCrawler()->find('$.store.book')[0];

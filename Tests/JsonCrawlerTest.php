@@ -49,9 +49,31 @@ class JsonCrawlerTest extends TestCase
         ], $result);
     }
 
+    public function testAllAuthorsWithBrackets()
+    {
+        $result = self::getBookstoreCrawler()->find('$..["author"]');
+
+        $this->assertCount(4, $result);
+        $this->assertSame([
+            'Nigel Rees',
+            'Evelyn Waugh',
+            'Herman Melville',
+            'J. R. R. Tolkien',
+        ], $result);
+    }
+
     public function testAllThingsInStore()
     {
         $result = self::getBookstoreCrawler()->find('$.store.*');
+
+        $this->assertCount(2, $result);
+        $this->assertCount(4, $result[0]);
+        $this->assertArrayHasKey('color', $result[1]);
+    }
+
+    public function testAllThingsInStoreWithBrackets()
+    {
+        $result = self::getBookstoreCrawler()->find('$["store"][*]');
 
         $this->assertCount(2, $result);
         $this->assertCount(4, $result[0]);
@@ -72,6 +94,14 @@ JSON);
     public function testBasicNameSelector()
     {
         $result = self::getBookstoreCrawler()->find('$.store.book')[0];
+
+        $this->assertCount(4, $result);
+        $this->assertSame('Nigel Rees', $result[0]['author']);
+    }
+
+    public function testBasicNameSelectorWithBrackts()
+    {
+        $result = self::getBookstoreCrawler()->find('$["store"]["book"]')[0];
 
         $this->assertCount(4, $result);
         $this->assertSame('Nigel Rees', $result[0]['author']);
@@ -113,6 +143,17 @@ JSON);
     public function testBooksWithIsbn()
     {
         $result = self::getBookstoreCrawler()->find('$..book[?(@.isbn)]');
+
+        $this->assertCount(2, $result);
+        $this->assertSame([
+            '0-553-21311-3',
+            '0-395-19395-8',
+        ], [$result[0]['isbn'], $result[1]['isbn']]);
+    }
+
+    public function testBooksWithBracketsAndFilter()
+    {
+        $result = self::getBookstoreCrawler()->find('$..["book"][?(@.isbn)]');
 
         $this->assertCount(2, $result);
         $this->assertSame([
@@ -213,6 +254,14 @@ JSON);
         $crawler = self::getSimpleCollectionCrawler();
 
         $result = $crawler->find('$.a[::-2]');
+        $this->assertSame([6, 2, 5], $result);
+    }
+
+    public function testEverySecondElementReverseSliceAndBrackets()
+    {
+        $crawler = self::getSimpleCollectionCrawler();
+
+        $result = $crawler->find('$["a"][::-2]');
         $this->assertSame([6, 2, 5], $result);
     }
 
@@ -403,6 +452,19 @@ JSON);
         $this->assertCount(1, $result);
         $this->assertSame('red', $result[0]['color']);
     }
+
+    public function testStarAsKey()
+    {
+        $crawler = new JsonCrawler(<<<JSON
+{"*": {"a": 1, "b": 2}, "something else": {"c": 3}}
+JSON);
+
+        $result = $crawler->find('$["*"]');
+
+        $this->assertCount(1, $result);
+        $this->assertSame(['a' => 1, 'b' => 2], $result[0]);
+    }
+
 
     private static function getBookstoreCrawler(): JsonCrawler
     {

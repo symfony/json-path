@@ -222,7 +222,7 @@ final class JsonCrawler implements JsonCrawlerInterface
                 throw new JsonCrawlerException($expr, 'Invalid filter expression');
             }
 
-            // remove outrer filter parentheses
+            // remove outer filter parentheses
             $innerExpr = substr(substr($filterExpr, 1), 0, -1);
 
             return $this->evaluateFilter($innerExpr, $value);

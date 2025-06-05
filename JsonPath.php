@@ -30,7 +30,9 @@ final class JsonPath
 
     public function key(string $key): static
     {
-        return new self($this->path.(str_ends_with($this->path, '..') ? '' : '.').$key);
+        $escaped = $this->escapeKey($key);
+
+        return new self($this->path.'["'.$escaped.'"]');
     }
 
     public function index(int $index): static
@@ -79,5 +81,26 @@ final class JsonPath
     public function __toString(): string
     {
         return $this->path;
+    }
+
+    private function escapeKey(string $key): string
+    {
+        $key = strtr($key, [
+            '\\' => '\\\\',
+            '"' => '\\"',
+            "\n" => '\\n',
+            "\r" => '\\r',
+            "\t" => '\\t',
+            "\b" => '\\b',
+            "\f" => '\\f'
+        ]);
+
+        for ($i = 0; $i <= 31; $i++) {
+            if ($i < 8 || $i > 13) {
+                $key = str_replace(chr($i), sprintf('\\u%04x', $i), $key);
+            }
+        }
+
+        return $key;
     }
 }

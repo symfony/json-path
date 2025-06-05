@@ -99,10 +99,10 @@ final class JsonPathUtils
         }
 
         $result = '';
-        $length = \strlen($str);
+        $i = -1;
 
-        for ($i = 0; $i < $length; ++$i) {
-            if ('\\' === $str[$i] && $i + 1 < $length) {
+        while (null !== $char = $str[++$i] ?? null) {
+            if ('\\' === $char && isset($str[$i + 1])) {
                 $result .= match ($str[$i + 1]) {
                     '"' => '"',
                     "'" => "'",
@@ -113,22 +113,22 @@ final class JsonPathUtils
                     'n' => "\n",
                     'r' => "\r",
                     't' => "\t",
-                    'u' => self::unescapeUnicodeSequence($str, $length, $i),
-                    default => $str[$i].$str[$i + 1], // keep the backslash
+                    'u' => self::unescapeUnicodeSequence($str, $i),
+                    default => $char.$str[$i + 1], // keep the backslash
                 };
 
                 ++$i;
             } else {
-                $result .= $str[$i];
+                $result .= $char;
             }
         }
 
         return $result;
     }
 
-    private static function unescapeUnicodeSequence(string $str, int $length, int &$i): string
+    private static function unescapeUnicodeSequence(string $str, int &$i): string
     {
-        if ($i + 5 >= $length) {
+        if (!isset($str[$i + 5])) {
             // not enough characters for Unicode escape, treat as literal
             return $str[$i];
         }
@@ -141,7 +141,7 @@ final class JsonPathUtils
 
         $codepoint = hexdec($hex);
         // looks like a valid Unicode codepoint, string length is sufficient and it starts with \u
-        if (0xD800 <= $codepoint && $codepoint <= 0xDBFF && $i + 11 < $length && '\\' === $str[$i + 6] && 'u' === $str[$i + 7]) {
+        if (0xD800 <= $codepoint && $codepoint <= 0xDBFF && isset($str[$i + 11]) && '\\' === $str[$i + 6] && 'u' === $str[$i + 7]) {
             $lowHex = substr($str, $i + 8, 4);
             if (ctype_xdigit($lowHex)) {
                 $lowSurrogate = hexdec($lowHex);
@@ -158,5 +158,73 @@ final class JsonPathUtils
         $i += 4;
 
         return mb_chr($codepoint, 'UTF-8');
+    }
+
+    /**
+     * @see https://datatracker.ietf.org/doc/rfc9535/, section 2.1.1
+     */
+    public static function normalizeWhitespace(string $input): string
+    {
+        $normalized = strtr($input, [
+            "\t" => ' ',
+            "\n" => ' ',
+            "\r" => ' ',
+        ]);
+
+        return trim($normalized);
+    }
+
+    /**
+     * Check a number is RFC 9535 compliant using strict JSON number format.
+     */
+    public static function isJsonNumber(string $value): bool
+    {
+        return preg_match('/^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/', $value);
+    }
+
+    public static function parseCommaSeparatedValues(string $expr): array
+    {
+        $parts = [];
+        $current = '';
+        $inQuotes = false;
+        $quoteChar = null;
+        $bracketDepth = 0;
+        $i = -1;
+
+        while (null !== $char = $expr[++$i] ?? null) {
+            if ('\\' === $char && isset($expr[$i + 1])) {
+                $current .= $char.$expr[++$i];
+                continue;
+            }
+
+            if ('"' === $char || "'" === $char) {
+                if (!$inQuotes) {
+                    $inQuotes = true;
+                    $quoteChar = $char;
+                } elseif ($char === $quoteChar) {
+                    $inQuotes = false;
+                    $quoteChar = null;
+                }
+            } elseif (!$inQuotes) {
+                if ('[' === $char) {
+                    ++$bracketDepth;
+                } elseif (']' === $char) {
+                    --$bracketDepth;
+                } elseif (0 === $bracketDepth && ',' === $char) {
+                    $parts[] = trim($current);
+                    $current = '';
+
+                    continue;
+                }
+            }
+
+            $current .= $char;
+        }
+
+        if ('' !== $current) {
+            $parts[] = trim($current);
+        }
+
+        return $parts;
     }
 }

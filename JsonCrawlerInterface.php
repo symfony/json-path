@@ -25,7 +25,7 @@ interface JsonCrawlerInterface
      * @return list<array|string|float|int|bool|null>
      *
      * @throws InvalidArgumentException When the JSON string provided to the crawler cannot be decoded
-     * @throws JsonCrawlerException When a syntax error occurs in the provided JSON path
+     * @throws JsonCrawlerException     When a syntax error occurs in the provided JSON path
      */
     public function find(string|JsonPath $query): array;
 }

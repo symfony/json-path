@@ -230,7 +230,7 @@ final class JsonCrawler implements JsonCrawlerInterface
 
         // quoted strings for object keys
         if (preg_match('/^([\'"])(.*)\1$/', $expr, $matches)) {
-            $key = stripslashes($matches[2]);
+            $key = JsonPathUtils::unescapeString($matches[2], $matches[1]);
 
             return \array_key_exists($key, $value) ? [$value[$key]] : [];
         }
@@ -335,7 +335,7 @@ final class JsonCrawler implements JsonCrawlerInterface
 
         // string literals
         if (preg_match('/^([\'"])(.*)\1$/', $expr, $matches)) {
-            return $matches[2];
+            return JsonPathUtils::unescapeString($matches[2], $matches[1]);
         }
 
         // current node references

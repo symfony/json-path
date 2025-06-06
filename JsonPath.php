@@ -92,12 +92,12 @@ final class JsonPath
             "\r" => '\\r',
             "\t" => '\\t',
             "\b" => '\\b',
-            "\f" => '\\f'
+            "\f" => '\\f',
         ]);
 
-        for ($i = 0; $i <= 31; $i++) {
+        for ($i = 0; $i <= 31; ++$i) {
             if ($i < 8 || $i > 13) {
-                $key = str_replace(chr($i), sprintf('\\u%04x', $i), $key);
+                $key = str_replace(\chr($i), \sprintf('\\u%04x', $i), $key);
             }
         }
 

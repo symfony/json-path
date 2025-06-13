@@ -180,6 +180,14 @@ JSON);
         ], [$result[0]['isbn'], $result[1]['isbn']]);
     }
 
+    public function testBooksWithPublisherAddress()
+    {
+        $result = self::getBookstoreCrawler()->find('$..book[?(@.publisher.address)]');
+
+        $this->assertCount(1, $result);
+        $this->assertSame('Sword of Honour', $result[0]['title']);
+    }
+
     public function testBooksWithBracketsAndFilter()
     {
         $result = self::getBookstoreCrawler()->find('$..["book"][?(@.isbn)]');
@@ -420,6 +428,50 @@ JSON);
 
         $this->assertCount(1, $result);
         $this->assertSame('Sayings of the Century', $result[0]['title']);
+    }
+
+    public function testDeepExpressionInFilter()
+    {
+        $result = self::getBookstoreCrawler()->find('$.store.book[?(@.publisher.address.city == "Springfield")]');
+
+        $this->assertCount(1, $result);
+        $this->assertSame('Sword of Honour', $result[0]['title']);
+    }
+
+    public function testWildcardInFilter()
+    {
+        $result = self::getBookstoreCrawler()->find('$.store.book[?(@.publisher.* == "my-publisher")]');
+
+        $this->assertCount(1, $result);
+        $this->assertSame('Sword of Honour', $result[0]['title']);
+    }
+
+    public function testWildcardInFunction()
+    {
+        $result = self::getBookstoreCrawler()->find('$.store.book[?match(@.publisher.*.city, "Spring.+")]');
+
+        $this->assertCount(1, $result);
+        $this->assertSame('Sword of Honour', $result[0]['title']);
+    }
+
+    public function testUseAtSymbolReturnsAll()
+    {
+        $result = self::getBookstoreCrawler()->find('$.store.bicycle[?(@ == @)]');
+
+        $this->assertSame([
+            'red',
+            399,
+        ], $result);
+    }
+
+    public function testUseAtSymbolAloneReturnsAll()
+    {
+        $result = self::getBookstoreCrawler()->find('$.store.bicycle[?(@)]');
+
+        $this->assertSame([
+            'red',
+            399,
+        ], $result);
     }
 
     public function testValueFunctionWithOuterParentheses()
@@ -756,7 +808,15 @@ JSON);
                 "category": "fiction",
                 "author": "Evelyn Waugh",
                 "title": "Sword of Honour",
-                "price": 12.99
+                "price": 12.99,
+                "publisher": {
+                    "name": "my-publisher",
+                    "address": {
+                        "street": "1234 Elm St",
+                        "city": "Springfield",
+                        "state": "IL"
+                    }
+                }
             },
             {
                 "category": "fiction",

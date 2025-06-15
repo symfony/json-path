@@ -91,6 +91,35 @@ JSON);
         $this->assertSame(42, $result[0]);
     }
 
+    public function testMultipleKeysAtOnce()
+    {
+        $crawler = new JsonCrawler(<<<JSON
+{"a": {"b\\"c": 42}, "b": {"c": 43}}
+JSON);
+
+        $result = $crawler->find("$['a', 'b', 3]");
+
+        $this->assertSame([
+            ['b"c' => 42],
+            ['c' => 43],
+        ], $result);
+    }
+
+    public function testMultipleKeysAtOnceOnArray()
+    {
+        $crawler = new JsonCrawler(<<<JSON
+[{"a": 1}, {"b": 2}, {"c": 3}, {"a,b,c":  5}, {"d": 4}]
+JSON);
+
+        $result = $crawler->find("$[0, 2, 'a,b,c', -1]");
+
+        $this->assertCount(4, $result);
+        $this->assertSame(['a' => 1], $result[0]);
+        $this->assertSame(['c' => 3], $result[1]);
+        $this->assertSame(['a,b,c' => 5], $result[2]);
+        $this->assertSame(['d' => 4], $result[3]);
+    }
+
     public function testBasicNameSelector()
     {
         $result = self::getBookstoreCrawler()->find('$.store.book')[0];
@@ -149,6 +178,14 @@ JSON);
             '0-553-21311-3',
             '0-395-19395-8',
         ], [$result[0]['isbn'], $result[1]['isbn']]);
+    }
+
+    public function testBooksWithPublisherAddress()
+    {
+        $result = self::getBookstoreCrawler()->find('$..book[?(@.publisher.address)]');
+
+        $this->assertCount(1, $result);
+        $this->assertSame('Sword of Honour', $result[0]['title']);
     }
 
     public function testBooksWithBracketsAndFilter()
@@ -391,6 +428,50 @@ JSON);
 
         $this->assertCount(1, $result);
         $this->assertSame('Sayings of the Century', $result[0]['title']);
+    }
+
+    public function testDeepExpressionInFilter()
+    {
+        $result = self::getBookstoreCrawler()->find('$.store.book[?(@.publisher.address.city == "Springfield")]');
+
+        $this->assertCount(1, $result);
+        $this->assertSame('Sword of Honour', $result[0]['title']);
+    }
+
+    public function testWildcardInFilter()
+    {
+        $result = self::getBookstoreCrawler()->find('$.store.book[?(@.publisher.* == "my-publisher")]');
+
+        $this->assertCount(1, $result);
+        $this->assertSame('Sword of Honour', $result[0]['title']);
+    }
+
+    public function testWildcardInFunction()
+    {
+        $result = self::getBookstoreCrawler()->find('$.store.book[?match(@.publisher.*.city, "Spring.+")]');
+
+        $this->assertCount(1, $result);
+        $this->assertSame('Sword of Honour', $result[0]['title']);
+    }
+
+    public function testUseAtSymbolReturnsAll()
+    {
+        $result = self::getBookstoreCrawler()->find('$.store.bicycle[?(@ == @)]');
+
+        $this->assertSame([
+            'red',
+            399,
+        ], $result);
+    }
+
+    public function testUseAtSymbolAloneReturnsAll()
+    {
+        $result = self::getBookstoreCrawler()->find('$.store.bicycle[?(@)]');
+
+        $this->assertSame([
+            'red',
+            399,
+        ], $result);
     }
 
     public function testValueFunctionWithOuterParentheses()
@@ -727,7 +808,15 @@ JSON);
                 "category": "fiction",
                 "author": "Evelyn Waugh",
                 "title": "Sword of Honour",
-                "price": 12.99
+                "price": 12.99,
+                "publisher": {
+                    "name": "my-publisher",
+                    "address": {
+                        "street": "1234 Elm St",
+                        "city": "Springfield",
+                        "state": "IL"
+                    }
+                }
             },
             {
                 "category": "fiction",

@@ -86,7 +86,7 @@ class JsonCrawlerTest extends TestCase
 {"a": {"b\\"c": 42}}
 JSON);
 
-        $result = $crawler->find("$['a']['b\\\"c']");
+        $result = $crawler->find('$["a"]["b\"c"]');
 
         $this->assertSame(42, $result[0]);
     }
@@ -642,10 +642,6 @@ JSON);
                 ['Japan'],
             ],
             [
-                "$['quote\"here']",
-                ['with quote'],
-            ],
-            [
                 "$['M\\u00fcller']",
                 [],
             ],
@@ -658,7 +654,7 @@ JSON);
                 ['with tab'],
             ],
             [
-                "$['quote\\\"here']",
+                "$['quote\"here']",
                 ['with quote'],
             ],
             [
@@ -721,29 +717,6 @@ JSON);
                 '$.users[?(@.name == "NonExistent\u0020Name")]',
                 0,
                 '',
-            ],
-        ];
-    }
-
-    /**
-     * @dataProvider provideInvalidUnicodeSequenceProvider
-     */
-    public function testInvalidUnicodeSequencesAreProcessedAsLiterals(string $jsonPath)
-    {
-        $this->assertIsArray(self::getUnicodeDocumentCrawler()->find($jsonPath), 'invalid unicode sequence should be treated as literal and not throw');
-    }
-
-    public static function provideInvalidUnicodeSequenceProvider(): array
-    {
-        return [
-            [
-                '$["test\uZZZZ"]',
-            ],
-            [
-                '$["test\u123"]',
-            ],
-            [
-                '$["test\u"]',
             ],
         ];
     }

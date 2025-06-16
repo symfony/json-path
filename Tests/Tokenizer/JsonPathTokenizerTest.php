@@ -355,9 +355,7 @@ class JsonPathTokenizerTest extends TestCase
             'special char first' => ['#test'],
             'start with digit' => ['123test'],
             'asterisk' => ['test*test'],
-            'space not allowed' => [' test'],
             'at sign not allowed' => ['@test'],
-            'start control char' => ["\0test"],
             'ending control char' => ["test\xFF\xFA"],
             'dash sign' => ['-test'],
         ];

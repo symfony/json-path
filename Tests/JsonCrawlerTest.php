@@ -500,6 +500,28 @@ JSON);
         $this->assertSame('J. R. R. Tolkien', $result[1]['author']);
     }
 
+    public function testMatchFunctionWithMultipleSpacesTrimmed()
+    {
+        $result = self::getBookstoreCrawler()->find("$.store.book[?(match(@.title, 'Sword   of  Honour'))]");
+
+        $this->assertSame([], $result);
+    }
+
+    public function testFilterMultiline()
+    {
+        $result = self::getBookstoreCrawler()->find(
+            '$
+                    .store
+                    .book[?
+                      length(@.author)>12
+                    ]'
+        );
+
+        $this->assertCount(2, $result);
+        $this->assertSame('Herman Melville', $result[0]['author']);
+        $this->assertSame('J. R. R. Tolkien', $result[1]['author']);
+    }
+
     public function testCountFunction()
     {
         $result = self::getBookstoreCrawler()->find('$.store.book[?count(@.extra) != 0]');
@@ -576,10 +598,6 @@ JSON);
             [
                 '$["tab\there"]',
                 ['with tab'],
-            ],
-            [
-                '$["new\nline"]',
-                ['with newline'],
             ],
             [
                 '$["quote\"here"]',

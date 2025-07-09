@@ -297,7 +297,7 @@ class JsonPathTokenizerTest extends TestCase
     public function testTokenizeThrowsExceptionForInvalidFilterSyntax()
     {
         $this->expectException(InvalidJsonPathException::class);
-        $this->expectExceptionMessage('JSONPath syntax error at position 22: unclosed bracket.');
+        $this->expectExceptionMessage('JSONPath syntax error at position 22: unclosed parenthesis.');
 
         JsonPathTokenizer::tokenize(new JsonPath('$.store[?(@.price > 10]'));
     }

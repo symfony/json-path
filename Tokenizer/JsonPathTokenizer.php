@@ -91,24 +91,22 @@ final class JsonPathTokenizer
                 $ord = \ord($char);
                 if ($inBracket) {
                     if ($ord <= 31) {
-                        $isEscapedChar = ($i > 0 && '\\' === $chars[$i - 1]);
-
-                        if (!$isEscapedChar) {
+                        if (!self::isEscaped($chars, $i)) {
                             throw new InvalidJsonPathException('control characters are not allowed in quoted strings.', $position);
                         }
                     }
 
-                    if ("\n" === $char && $i > 0 && '\\' === $chars[$i - 1]) {
+                    if ("\n" === $char && self::isEscaped($chars, $i)) {
                         throw new InvalidJsonPathException('escaped newlines are not allowed in quoted strings.', $position);
                     }
 
-                    if ('u' === $char && $i > 0 && '\\' === $chars[$i - 1]) {
+                    if ('u' === $char && self::isEscaped($chars, $i)) {
                         self::validateUnicodeEscape($chars, $i, $position);
                     }
                 }
 
                 $current .= $char;
-                if ($char === $quoteChar && (0 === $i || '\\' !== $chars[$i - 1])) {
+                if ($char === $quoteChar && !self::isEscaped($chars, $i)) {
                     $inQuote = false;
                 }
 
@@ -162,8 +160,13 @@ final class JsonPathTokenizer
                     // validate filter expressions
                     if (str_starts_with($current, '?')) {
                         if ($filterParenthesisDepth > 0) {
+                            throw new InvalidJsonPathException('unclosed parenthesis.', $position);
+                        }
+
+                        if ($filterBracketDepth > 0) {
                             throw new InvalidJsonPathException('unclosed bracket.', $position);
                         }
+
                         self::validateFilterExpression($current, $position);
                     }
 
@@ -258,12 +261,30 @@ final class JsonPathTokenizer
             throw new InvalidJsonPathException('invalid JSONPath expression.');
         }
 
+        if (1 === \count($tokens) && TokenType::Recursive === $tokens[0]->type) {
+            throw new InvalidJsonPathException('descendant segment must be followed by a selector.');
+        }
+
         return $tokens;
     }
 
     private static function isWhitespace(string $char): bool
     {
         return \in_array($char, self::RFC9535_WHITESPACE_CHARS, true);
+    }
+
+    private static function isEscaped(array $chars, int $position): bool
+    {
+        if (0 === $position) {
+            return false;
+        }
+
+        $consecutiveBackslashes = 0;
+        for ($i = $position - 1; $i >= 0 && '\\' === $chars[$i]; --$i) {
+            ++$consecutiveBackslashes;
+        }
+
+        return 1 === $consecutiveBackslashes % 2;
     }
 
     private static function skipWhitespace(array $chars, int $index, int $length): int

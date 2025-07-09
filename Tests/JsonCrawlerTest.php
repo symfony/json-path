@@ -783,6 +783,14 @@ JSON);
         $this->assertSame(['value2'], $result);
     }
 
+    public function testEmptyLengthFunction()
+    {
+        $crawler = new JsonCrawler('{"choices": [{"message": {"content": null}}]}');
+        $result = $crawler->find('$.choices[?length(@.message.content) >= 0].message.content');
+
+        $this->assertSame([], $result);
+    }
+
     private static function getBookstoreCrawler(): JsonCrawler
     {
         return new JsonCrawler(<<<JSON

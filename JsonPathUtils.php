@@ -12,6 +12,7 @@
 namespace Symfony\Component\JsonPath;
 
 use Symfony\Component\JsonPath\Exception\InvalidArgumentException;
+use Symfony\Component\JsonPath\Exception\JsonCrawlerException;
 use Symfony\Component\JsonPath\Tokenizer\JsonPathToken;
 use Symfony\Component\JsonPath\Tokenizer\TokenType;
 use Symfony\Component\JsonStreamer\Read\Splitter;
@@ -86,6 +87,9 @@ final class JsonPathUtils
         ];
     }
 
+    /**
+     * @throws JsonCrawlerException When an invalid Unicode escape sequence occurs
+     */
     public static function unescapeString(string $str, string $quoteChar): string
     {
         if ('"' === $quoteChar) {
@@ -104,17 +108,16 @@ final class JsonPathUtils
         while (null !== $char = $str[++$i] ?? null) {
             if ('\\' === $char && isset($str[$i + 1])) {
                 $result .= match ($str[$i + 1]) {
-                    '"' => '"',
-                    "'" => "'",
                     '\\' => '\\',
                     '/' => '/',
-                    'b' => "\b",
+                    'b' => "\x08",
                     'f' => "\f",
                     'n' => "\n",
                     'r' => "\r",
                     't' => "\t",
                     'u' => self::unescapeUnicodeSequence($str, $i),
-                    default => $char.$str[$i + 1], // keep the backslash
+                    $quoteChar => $quoteChar,
+                    default => throw new JsonCrawlerException('', \sprintf('Invalid escape sequence "\\%s" in %s-quoted string', $str[$i + 1], "'" === $quoteChar ? 'single' : 'double')),
                 };
 
                 ++$i;
@@ -128,16 +131,11 @@ final class JsonPathUtils
 
     private static function unescapeUnicodeSequence(string $str, int &$i): string
     {
-        if (!isset($str[$i + 5])) {
-            // not enough characters for Unicode escape, treat as literal
-            return $str[$i];
+        if (!isset($str[$i + 5]) || !ctype_xdigit(substr($str, $i + 2, 4))) {
+            throw new JsonCrawlerException('', 'Invalid unicode escape sequence');
         }
 
         $hex = substr($str, $i + 2, 4);
-        if (!ctype_xdigit($hex)) {
-            // invalid hex, treat as literal
-            return $str[$i];
-        }
 
         $codepoint = hexdec($hex);
         // looks like a valid Unicode codepoint, string length is sufficient and it starts with \u

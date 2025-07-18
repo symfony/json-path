@@ -143,6 +143,10 @@ final class JsonCrawler implements JsonCrawlerInterface
 
         // single negative index
         if (preg_match('/^-\d+$/', $expr)) {
+            if (JsonPathUtils::hasLeadingZero($expr) || JsonPathUtils::isIntegerOverflow($expr) || '-0' === $expr) {
+                throw new JsonCrawlerException($expr, 'invalid index selector');
+            }
+
             if (!array_is_list($value)) {
                 return [];
             }
@@ -154,6 +158,12 @@ final class JsonCrawler implements JsonCrawlerInterface
 
         // start and end index
         if (preg_match('/^-?\d+(?:\s*,\s*-?\d+)*$/', $expr)) {
+            foreach (explode(',', $expr) as $exprPart) {
+                if (JsonPathUtils::hasLeadingZero($exprPart = trim($exprPart)) || JsonPathUtils::isIntegerOverflow($exprPart) || '-0' === $exprPart) {
+                    throw new JsonCrawlerException($expr, 'invalid index selector');
+                }
+            }
+
             if (!array_is_list($value)) {
                 return [];
             }
@@ -172,17 +182,41 @@ final class JsonCrawler implements JsonCrawlerInterface
             return $result;
         }
 
-        if (preg_match('/^(-?\d*+)\s*+:\s*+(-?\d*+)(?:\s*+:\s*+(-?\d++))?$/', $expr, $matches)) {
+        if (preg_match('/^(-?\d*+)\s*+:\s*+(-?\d*+)(?:\s*+:\s*+(-?\d*+))?$/', $expr, $matches)) {
             if (!array_is_list($value)) {
                 return [];
             }
 
-            $length = \count($value);
-            $start = '' !== $matches[1] ? (int) $matches[1] : null;
-            $end = '' !== $matches[2] ? (int) $matches[2] : null;
-            $step = isset($matches[3]) && '' !== $matches[3] ? (int) $matches[3] : 1;
+            $startStr = trim($matches[1]);
+            $endStr = trim($matches[2]);
+            $stepStr = trim($matches[3] ?? '1');
 
-            if (0 === $step || $start > $length) {
+            if (
+                JsonPathUtils::hasLeadingZero($startStr)
+                || JsonPathUtils::hasLeadingZero($endStr)
+                || JsonPathUtils::hasLeadingZero($stepStr)
+            ) {
+                throw new JsonCrawlerException($expr, 'slice selector numbers cannot have leading zeros');
+            }
+
+            if ('-0' === $startStr || '-0' === $endStr || '-0' === $stepStr) {
+                throw new JsonCrawlerException($expr, 'slice selector cannot contain negative zero');
+            }
+
+            if (
+                JsonPathUtils::isIntegerOverflow($startStr)
+                || JsonPathUtils::isIntegerOverflow($endStr)
+                || JsonPathUtils::isIntegerOverflow($stepStr)
+            ) {
+                throw new JsonCrawlerException($expr, 'slice selector integer overflow');
+            }
+
+            $length = \count($value);
+            $start = '' !== $startStr ? (int) $startStr : null;
+            $end = '' !== $endStr ? (int) $endStr : null;
+            $step = '' !== $stepStr ? (int) $stepStr : 1;
+
+            if (0 === $step) {
                 return [];
             }
 
@@ -192,6 +226,11 @@ final class JsonCrawler implements JsonCrawlerInterface
                 if ($start < 0) {
                     $start = $length + $start;
                 }
+
+                if ($step > 0 && $start >= $length) {
+                    return [];
+                }
+
                 $start = max(0, min($start, $length - 1));
             }
 

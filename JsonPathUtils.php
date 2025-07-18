@@ -225,4 +225,39 @@ final class JsonPathUtils
 
         return $parts;
     }
+
+    public static function hasLeadingZero(string $s): bool
+    {
+        if ('' === $s || str_starts_with($s, '-') && '' === $s = substr($s, 1)) {
+            return false;
+        }
+
+        return '0' === $s[0] && 1 < \strlen($s);
+    }
+
+    /**
+     * Safe integer range is [-(2^53) + 1, (2^53) - 1].
+     *
+     * @see https://datatracker.ietf.org/doc/rfc9535/, section 2.1
+     */
+    public static function isIntegerOverflow(string $s): bool
+    {
+        if ('' === $s) {
+            return false;
+        }
+
+        $negative = str_starts_with($s, '-');
+        $maxLength = $negative ? 17 : 16;
+        $len = \strlen($s);
+
+        if ($len > $maxLength) {
+            return true;
+        }
+
+        if ($len < $maxLength) {
+            return false;
+        }
+
+        return $negative ? $s < '-9007199254740991' : $s > '9007199254740991';
+    }
 }

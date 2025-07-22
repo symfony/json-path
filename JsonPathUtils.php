@@ -117,7 +117,7 @@ final class JsonPathUtils
                     't' => "\t",
                     'u' => self::unescapeUnicodeSequence($str, $i),
                     $quoteChar => $quoteChar,
-                    default => throw new JsonCrawlerException('', \sprintf('Invalid escape sequence "\\%s" in %s-quoted string', $str[$i + 1], "'" === $quoteChar ? 'single' : 'double')),
+                    default => throw new JsonCrawlerException('', \sprintf('Invalid escape sequence "\\%s" in %s-quoted string.', $str[$i + 1], "'" === $quoteChar ? 'single' : 'double')),
                 };
 
                 ++$i;
@@ -132,30 +132,33 @@ final class JsonPathUtils
     private static function unescapeUnicodeSequence(string $str, int &$i): string
     {
         if (!isset($str[$i + 5]) || !ctype_xdigit(substr($str, $i + 2, 4))) {
-            throw new JsonCrawlerException('', 'Invalid unicode escape sequence');
+            throw new JsonCrawlerException('', 'Invalid unicode escape sequence.');
         }
 
-        $hex = substr($str, $i + 2, 4);
+        $codepoint = hexdec(substr($str, $i + 2, 4));
 
-        $codepoint = hexdec($hex);
         // looks like a valid Unicode codepoint, string length is sufficient and it starts with \u
-        if (0xD800 <= $codepoint && $codepoint <= 0xDBFF && isset($str[$i + 11]) && '\\' === $str[$i + 6] && 'u' === $str[$i + 7]) {
-            $lowHex = substr($str, $i + 8, 4);
-            if (ctype_xdigit($lowHex)) {
-                $lowSurrogate = hexdec($lowHex);
-                if (0xDC00 <= $lowSurrogate && $lowSurrogate <= 0xDFFF) {
-                    $codepoint = 0x10000 + (($codepoint & 0x3FF) << 10) + ($lowSurrogate & 0x3FF);
-                    $i += 10; // skip surrogate pair
-
-                    return mb_chr($codepoint, 'UTF-8');
-                }
-            }
+        if (0xD800 <= $codepoint
+            && $codepoint <= 0xDBFF
+            && isset($str[$i + 11])
+            && '\\' === $str[$i + 6]
+            && 'u' === $str[$i + 7]
+            && ctype_xdigit($lowSurrogate = substr($str, $i + 8, 4))
+            && 0xDC00 <= ($lowSurrogate = hexdec($lowSurrogate))
+            && $lowSurrogate <= 0xDFFF
+        ) {
+            $codepoint = 0x10000 + (($codepoint & 0x3FF) << 10) + ($lowSurrogate & 0x3FF);
+            $i += 10; // skip surrogate pair
+        } else {
+            // single Unicode character or invalid surrogate, skip the sequence
+            $i += 4;
         }
 
-        // single Unicode character or invalid surrogate, skip the sequence
-        $i += 4;
+        if (false === $chr = mb_chr($codepoint, 'UTF-8')) {
+            throw new JsonCrawlerException('', \sprintf('Invalid Unicode codepoint: U+%04X.', $codepoint));
+        }
 
-        return mb_chr($codepoint, 'UTF-8');
+        return $chr;
     }
 
     /**

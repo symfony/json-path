@@ -12,6 +12,7 @@
 namespace Symfony\Component\JsonPath;
 
 use Symfony\Component\JsonPath\Exception\InvalidArgumentException;
+use Symfony\Component\JsonPath\Exception\InvalidJsonPathException;
 use Symfony\Component\JsonPath\Exception\InvalidJsonStringInputException;
 use Symfony\Component\JsonPath\Exception\JsonCrawlerException;
 use Symfony\Component\JsonPath\Tokenizer\JsonPathToken;
@@ -83,7 +84,7 @@ final class JsonCrawler implements JsonCrawlerInterface
             return $this->evaluateTokensOnDecodedData($tokens, $data);
         } catch (InvalidArgumentException $e) {
             throw $e;
-        } catch (\Throwable $e) {
+        } catch (InvalidJsonPathException $e) {
             throw new JsonCrawlerException($query, $e->getMessage(), previous: $e);
         }
     }
@@ -329,7 +330,7 @@ final class JsonCrawler implements JsonCrawlerInterface
             return \array_key_exists($key, $value) ? [$value[$key]] : [];
         }
 
-        throw new \LogicException(\sprintf('Unsupported bracket expression "%s".', $expr));
+        throw new InvalidJsonPathException(\sprintf('Unsupported bracket expression "%s".', $expr));
     }
 
     private function evaluateFilter(string $expr, mixed $value): array

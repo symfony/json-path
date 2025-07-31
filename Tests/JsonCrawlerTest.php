@@ -11,6 +11,7 @@
 
 namespace Symfony\Component\JsonPath\Tests;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\JsonPath\Exception\InvalidArgumentException;
 use Symfony\Component\JsonPath\Exception\InvalidJsonStringInputException;
@@ -568,9 +569,7 @@ JSON);
         $this->assertSame(['a' => 1, 'b' => 2], $result[0]);
     }
 
-    /**
-     * @dataProvider provideUnicodeEscapeSequencesProvider
-     */
+    #[DataProvider('provideUnicodeEscapeSequencesProvider')]
     public function testUnicodeEscapeSequences(string $jsonPath, array $expected)
     {
         $this->assertSame($expected, self::getUnicodeDocumentCrawler()->find($jsonPath));
@@ -622,9 +621,7 @@ JSON);
         ];
     }
 
-    /**
-     * @dataProvider provideSingleQuotedStringProvider
-     */
+    #[DataProvider('provideSingleQuotedStringProvider')]
     public function testSingleQuotedStrings(string $jsonPath, array $expected)
     {
         $this->assertSame($expected, self::getUnicodeDocumentCrawler()->find($jsonPath));
@@ -676,9 +673,7 @@ JSON);
         ];
     }
 
-    /**
-     * @dataProvider provideFilterWithUnicodeProvider
-     */
+    #[DataProvider('provideFilterWithUnicodeProvider')]
     public function testFilterWithUnicodeStrings(string $jsonPath, int $expectedCount, string $expectedCountry)
     {
         $result = self::getUnicodeDocumentCrawler()->find($jsonPath);
@@ -721,9 +716,7 @@ JSON);
         ];
     }
 
-    /**
-     * @dataProvider provideComplexUnicodePath
-     */
+    #[DataProvider('provideComplexUnicodePath')]
     public function testComplexUnicodePaths(string $jsonPath, array $expected)
     {
         $complexJson = [

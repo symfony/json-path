@@ -11,6 +11,7 @@
 
 namespace Symfony\Component\JsonPath\Tests;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\JsonPath\Exception\JsonCrawlerException;
 use Symfony\Component\JsonPath\JsonCrawler;
@@ -139,9 +140,7 @@ final class JsonPathComplianceTestSuiteTest extends TestCase
         'filter, group terms, left',
     ];
 
-    /**
-     * @dataProvider complianceCaseProvider
-     */
+    #[DataProvider('complianceCaseProvider')]
     public function testComplianceTestCase(string $selector, array $document, array $expectedResults, bool $invalidSelector)
     {
         $jsonCrawler = new JsonCrawler(json_encode($document));

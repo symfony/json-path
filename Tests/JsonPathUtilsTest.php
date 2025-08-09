@@ -53,7 +53,9 @@ class JsonPathUtilsTest extends TestCase
                 {"category": "reference", "author": "Nigel Rees", "title": "Sayings", "price": 8.95},
                 {"category": "fiction", "author": "Evelyn Waugh", "title": "Sword", "price": 12.99}
             ]}
-            JSON, $reduced['json']);
+            JSON,
+            $reduced['json']
+        );
         $this->assertEquals([new JsonPathToken(TokenType::Name, 'book')], $reduced['tokens']);
     }
 
@@ -74,7 +76,9 @@ class JsonPathUtilsTest extends TestCase
                 {"category": "reference", "author": "Nigel Rees", "title": "Sayings", "price": 8.95},
                 {"category": "fiction", "author": "Evelyn Waugh", "title": "Sword", "price": 12.99}
             ]}
-            JSON, $reduced['json']);
+            JSON,
+            $reduced['json']
+        );
         $this->assertEquals([new JsonPathToken(TokenType::Bracket, '?(@.book.author == "Nigel Rees")')], $reduced['tokens']);
     }
 
@@ -116,7 +120,10 @@ class JsonPathUtilsTest extends TestCase
                 {"category": "reference", "author": "Nigel Rees", "title": "Sayings", "price": 8.95},
                 {"category": "fiction", "author": "Evelyn Waugh", "title": "Sword", "price": 12.99}
             ]
-            JSON, $reduced['json'], 'reduce to "book", but not further');
+            JSON,
+            $reduced['json'],
+            'reduce to "book", but not further'
+        );
         $this->assertEquals([
             new JsonPathToken(TokenType::Bracket, '1:2'),
         ], $reduced['tokens']);
@@ -158,7 +165,10 @@ class JsonPathUtilsTest extends TestCase
                 {"category": "reference", "author": "Nigel Rees", "title": "Sayings", "price": 8.95},
                 {"category": "fiction", "author": "Evelyn Waugh", "title": "Sword", "price": 12.99}
             ]
-            JSON, $reduced['json'], 'reduce to "book", but not further');
+            JSON,
+            $reduced['json'],
+            'reduce to "book", but not further'
+        );
         $this->assertEquals([
             new JsonPathToken(TokenType::Bracket, '123'),
             new JsonPathToken(TokenType::Name, 'title'),

@@ -26,8 +26,6 @@ use Symfony\Component\JsonStreamer\Read\Splitter;
  * @see https://datatracker.ietf.org/doc/html/rfc9535
  *
  * @author Alexandre Daubois <alex.daubois@gmail.com>
- *
- * @experimental
  */
 final class JsonCrawler implements JsonCrawlerInterface
 {

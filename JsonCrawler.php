@@ -18,6 +18,7 @@ use Symfony\Component\JsonPath\Exception\JsonCrawlerException;
 use Symfony\Component\JsonPath\Tokenizer\JsonPathToken;
 use Symfony\Component\JsonPath\Tokenizer\JsonPathTokenizer;
 use Symfony\Component\JsonPath\Tokenizer\TokenType;
+use Symfony\Component\JsonStreamer\Exception\UnexpectedValueException;
 use Symfony\Component\JsonStreamer\Read\Splitter;
 
 /**
@@ -29,12 +30,26 @@ use Symfony\Component\JsonStreamer\Read\Splitter;
  */
 final class JsonCrawler implements JsonCrawlerInterface
 {
+    private static \stdClass $nothing;
+
     private const RFC9535_FUNCTIONS = [
         'length' => true,
         'count' => true,
         'match' => true,
         'search' => true,
         'value' => true,
+    ];
+
+    /**
+     * Comparison operators and their corresponding lengths.
+     */
+    private const COMPARISON_OPERATORS = [
+        '!=' => 2,
+        '==' => 2,
+        '>=' => 2,
+        '<=' => 2,
+        '>' => 1,
+        '<' => 1,
     ];
 
     /**
@@ -56,30 +71,64 @@ final class JsonCrawler implements JsonCrawlerInterface
     private function evaluate(JsonPath $query): array
     {
         try {
-            $tokens = JsonPathTokenizer::tokenize($query);
-            $json = $this->raw;
+            if ($this->isComplexBracketExpression($query)) {
+                preg_match('/^\$\[([^\[\]]+)]$/', $query, $matches);
 
-            if (\is_resource($this->raw)) {
+                if (\is_resource($json = $this->raw)) {
+                    if (0 !== ftell($this->raw)) {
+                        rewind($this->raw);
+                    }
+
+                    if (false === $json = stream_get_contents($this->raw)) {
+                        throw new \RuntimeException('Failed to read from resource stream.');
+                    }
+                }
+
+                try {
+                    $data = json_decode($json, false, 512, \JSON_THROW_ON_ERROR);
+                } catch (\JsonException $e) {
+                    throw new InvalidJsonStringInputException($e->getMessage(), $e);
+                }
+
+                return $this->normalizeStorage($this->evaluateBracket($matches[1], $data));
+            }
+
+            $tokens = JsonPathTokenizer::tokenize($query);
+
+            if (\is_resource($json = $this->raw)) {
                 if (!class_exists(Splitter::class)) {
                     throw new \LogicException('The JsonStreamer package is required to evaluate a path against a resource. Try running "composer require symfony/json-streamer".');
                 }
 
-                $simplified = JsonPathUtils::findSmallestDeserializableStringAndPath(
-                    $tokens,
-                    $this->raw,
-                );
+                try {
+                    $simplified = JsonPathUtils::findSmallestDeserializableStringAndPath($tokens, $this->raw);
 
-                $tokens = $simplified['tokens'];
-                $json = $simplified['json'];
+                    $tokens = $simplified['tokens'];
+                    $json = $simplified['json'];
+
+                    if (!$json) {
+                        throw new \LogicException(); // fallback to reading the entire stream
+                    }
+                } catch (\LogicException|UnexpectedValueException) {
+                    if (0 !== ftell($this->raw)) {
+                        rewind($this->raw);
+                    }
+
+                    if (false === $json = stream_get_contents($this->raw)) {
+                        throw new \RuntimeException('Failed to read from resource stream.');
+                    }
+
+                    $tokens = JsonPathTokenizer::tokenize($query);
+                }
             }
 
             try {
-                $data = json_decode($json, true, 512, \JSON_THROW_ON_ERROR);
+                $data = json_decode($json, false, 512, \JSON_THROW_ON_ERROR);
             } catch (\JsonException $e) {
                 throw new InvalidJsonStringInputException($e->getMessage(), $e);
             }
 
-            return $this->evaluateTokensOnDecodedData($tokens, $data);
+            return $this->normalizeStorage($this->evaluateTokensOnDecodedData($tokens, $data));
         } catch (InvalidArgumentException $e) {
             throw $e;
         } catch (InvalidJsonPathException $e) {
@@ -87,15 +136,53 @@ final class JsonCrawler implements JsonCrawlerInterface
         }
     }
 
-    private function evaluateTokensOnDecodedData(array $tokens, array $data): array
+    private function isComplexBracketExpression(JsonPath $query): bool
+    {
+        if (!preg_match('/^\$\[([^\[\]]+)]$/', (string) $query, $matches)) {
+            return false;
+        }
+
+        $bracketContent = $matches[1];
+        if (!str_contains($bracketContent, ',') || !str_contains($bracketContent, '?')) {
+            return false;
+        }
+
+        return $this->isValidMixedBracketExpression($bracketContent);
+    }
+
+    private function evaluateTokensOnDecodedData(array $tokens, mixed $data): array
     {
         $current = [$data];
+        $tokenCount = \count($tokens);
 
-        foreach ($tokens as $token) {
+        for ($i = 0; $i < $tokenCount; ++$i) {
+            $token = $tokens[$i];
             $next = [];
-            foreach ($current as $value) {
-                $result = $this->evaluateToken($token, $value);
-                $next = array_merge($next, $result);
+
+            // recursive token followed by bracket with property selectors
+            if (TokenType::Recursive === $token->type
+                && isset($tokens[$i + 1])
+                && TokenType::Bracket === $tokens[$i + 1]->type
+                && (str_contains($tokens[$i + 1]->value, '"') || str_contains($tokens[$i + 1]->value, "'"))
+            ) {
+                $bracketToken = $tokens[$i + 1];
+
+                foreach ($current as $value) {
+                    $recursiveResults = $this->evaluateToken($token, $value);
+
+                    foreach ($recursiveResults as $recursiveValue) {
+                        if (\is_array($recursiveValue) && !array_is_list($recursiveValue) || $recursiveValue instanceof \stdClass) {
+                            $bracketResults = $this->evaluateToken($bracketToken, $recursiveValue);
+                            $next = array_merge($next, $bracketResults);
+                        }
+                    }
+                }
+
+                ++$i;
+            } else {
+                foreach ($current as $value) {
+                    $next = array_merge($next, $this->evaluateToken($token, $value));
+                }
             }
 
             $current = $next;
@@ -115,20 +202,20 @@ final class JsonCrawler implements JsonCrawlerInterface
 
     private function evaluateName(string $name, mixed $value): array
     {
-        if (!\is_array($value)) {
+        if (!$this->isArrayOrObject($value)) {
             return [];
         }
 
         if ('*' === $name) {
-            return array_values($value);
+            return array_values((array) $value);
         }
 
-        return \array_key_exists($name, $value) ? [$value[$name]] : [];
+        return $this->getValueIfKeyExists($value, $name);
     }
 
     private function evaluateBracket(string $expr, mixed $value): array
     {
-        if (!\is_array($value)) {
+        if (!$this->isArrayOrObject($value)) {
             return [];
         }
 
@@ -137,7 +224,7 @@ final class JsonCrawler implements JsonCrawlerInterface
         }
 
         if ('*' === $expr = JsonPathUtils::normalizeWhitespace($expr)) {
-            return array_values($value);
+            return array_values((array) $value);
         }
 
         // single negative index
@@ -146,11 +233,28 @@ final class JsonCrawler implements JsonCrawlerInterface
                 throw new JsonCrawlerException($expr, 'invalid index selector');
             }
 
-            if (!array_is_list($value)) {
+            // numeric indices only work on lists
+            if (!\is_array($value)) {
                 return [];
             }
 
             $index = \count($value) + (int) $expr;
+
+            return isset($value[$index]) ? [$value[$index]] : [];
+        }
+
+        // single positive index
+        if (preg_match('/^\d+$/', $expr)) {
+            if (JsonPathUtils::hasLeadingZero($expr) || JsonPathUtils::isIntegerOverflow($expr)) {
+                throw new JsonCrawlerException($expr, 'invalid index selector');
+            }
+
+            // numeric indices only work on lists
+            if (!\is_array($value)) {
+                return [];
+            }
+
+            $index = (int) $expr;
 
             return isset($value[$index]) ? [$value[$index]] : [];
         }
@@ -163,7 +267,8 @@ final class JsonCrawler implements JsonCrawlerInterface
                 }
             }
 
-            if (!array_is_list($value)) {
+            // numeric indices only work on lists
+            if (!\is_array($value)) {
                 return [];
             }
 
@@ -182,7 +287,7 @@ final class JsonCrawler implements JsonCrawlerInterface
         }
 
         if (preg_match('/^(-?\d*+)\s*+:\s*+(-?\d*+)(?:\s*+:\s*+(-?\d*+))?$/', $expr, $matches)) {
-            if (!array_is_list($value)) {
+            if (!\is_array($value) || !array_is_list($value)) {
                 return [];
             }
 
@@ -226,7 +331,7 @@ final class JsonCrawler implements JsonCrawlerInterface
                     $start = $length + $start;
                 }
 
-                if ($step > 0 && $start >= $length) {
+                if (0 < $step && $start >= $length) {
                     return [];
                 }
 
@@ -256,20 +361,64 @@ final class JsonCrawler implements JsonCrawlerInterface
             return $result;
         }
 
+        // comma-separated expressions with at least one filter (e.g. "?@.a,?@.b", "?@.a,1", "1,?@.a=='b',1:")
+        if (str_contains($expr, ',') && str_contains($expr, '?') && $this->isValidMixedBracketExpression($expr)) {
+            $parts = JsonPathUtils::parseCommaSeparatedValues($expr);
+            $result = [];
+            foreach ($parts as $part) {
+                $part = trim($part);
+
+                if (preg_match('/^\?(.*)$/', $part, $matches)) {
+                    $result = array_merge($result, $this->evaluateFilter(trim($matches[1]), $value));
+
+                    continue;
+                }
+
+                $selectorResult = $this->evaluateBracket($part, $value);
+                $result = array_merge($result, $selectorResult);
+            }
+
+            return $result;
+        }
+
         // filter expressions
         if (preg_match('/^\?(.*)$/', $expr, $matches)) {
-            if (preg_match('/^(\w+)\s*\([^()]*\)\s*([<>=!]+.*)?$/', $filterExpr = trim($matches[1]))) {
+            $filterExpr = trim($matches[1]);
+
+            // is it a function call?
+            if (preg_match('/^(\w+)\s*\([^()]*\)\s*([<>=!]+.*)?$/', $filterExpr)) {
                 $filterExpr = "($filterExpr)";
             }
 
-            if (!str_starts_with($filterExpr, '(')) {
+            $needsParentheses = true;
+            if (str_starts_with($filterExpr, '(') && str_ends_with($filterExpr, ')')) {
+                $depth = 0;
+                $isWrapped = true;
+                $filterLen = \strlen($filterExpr);
+
+                for ($i = 0; $i < $filterLen; ++$i) {
+                    $char = $filterExpr[$i];
+                    if ('(' === $char) {
+                        ++$depth;
+                    } elseif (')' === $char && 0 === --$depth && $i < $filterLen - 1) {
+                        $isWrapped = false;
+                        break;
+                    }
+                }
+
+                if ($isWrapped) {
+                    $needsParentheses = false;
+                    $filterExpr = trim(substr($filterExpr, 1, -1));
+                }
+            }
+
+            if ($needsParentheses && !str_starts_with($filterExpr, '(')) {
                 $filterExpr = "($filterExpr)";
             }
 
-            // remove outer filter parentheses
-            $innerExpr = substr(substr($filterExpr, 1), 0, -1);
+            $this->validateFilterExpression($filterExpr);
 
-            return $this->evaluateFilter($innerExpr, $value);
+            return $this->evaluateFilter($filterExpr, $value);
         }
 
         // comma-separated values, e.g. `['key1', 'key2', 123]` or `[0, 1, 'key']`
@@ -278,11 +427,56 @@ final class JsonCrawler implements JsonCrawlerInterface
 
             $result = [];
 
+            $allStringKeys = true;
+            foreach ($parts as $part) {
+                $part = trim($part);
+                if (!preg_match('/^([\'"])(.*)\1$/', $part)) {
+                    $allStringKeys = false;
+
+                    break;
+                }
+            }
+
+            if ($allStringKeys) {
+                if (!\is_array($value) || !array_is_list($value)) {
+                    foreach ($parts as $part) {
+                        $part = trim($part);
+
+                        if (!preg_match('/^([\'"])(.*)\1$/', $part, $matches)) {
+                            continue;
+                        }
+
+                        $key = JsonPathUtils::unescapeString($matches[2], $matches[1]);
+                        $result = array_merge($result, $this->getValueIfKeyExists($value, $key));
+                    }
+
+                    return $result;
+                }
+
+                foreach ($value as $item) {
+                    if (!\is_array($item)) {
+                        continue;
+                    }
+
+                    foreach ($parts as $part) {
+                        $part = trim($part);
+                        if (!preg_match('/^([\'"])(.*)\1$/', $part, $matches)) {
+                            continue;
+                        }
+
+                        $key = JsonPathUtils::unescapeString($matches[2], $matches[1]);
+                        $result = array_merge($result, $this->getValueIfKeyExists($item, $key));
+                    }
+                }
+
+                return $result;
+            }
+
             foreach ($parts as $part) {
                 $part = trim($part);
 
                 if ('*' === $part) {
-                    $result = array_merge($result, array_values($value));
+                    $result = array_merge($result, array_values((array) $value));
                 } elseif (preg_match('/^(-?\d*+)\s*+:\s*+(-?\d*+)(?:\s*+:\s*+(-?\d++))?$/', $part, $matches)) {
                     // slice notation
                     $sliceResult = $this->evaluateBracket($part, $value);
@@ -290,15 +484,15 @@ final class JsonCrawler implements JsonCrawlerInterface
                 } elseif (preg_match('/^([\'"])(.*)\1$/', $part, $matches)) {
                     $key = JsonPathUtils::unescapeString($matches[2], $matches[1]);
 
-                    if (array_is_list($value)) {
+                    if (\is_array($value) && array_is_list($value)) {
                         // for arrays, find ALL objects that contain this key
                         foreach ($value as $item) {
-                            if (\is_array($item) && \array_key_exists($key, $item)) {
+                            if ($this->getValueIfKeyExists($item, $key)) {
                                 $result[] = $item;
                             }
                         }
-                    } elseif (\array_key_exists($key, $value)) { // for objects, get the value for this key
-                        $result[] = $value[$key];
+                    } else {
+                        $result = array_merge($result, $this->getValueIfKeyExists($value, $key));
                     }
                 } elseif (preg_match('/^-?\d+$/', $part)) {
                     // numeric index
@@ -307,14 +501,8 @@ final class JsonCrawler implements JsonCrawlerInterface
                         $index = \count($value) + $index;
                     }
 
-                    if (array_is_list($value) && \array_key_exists($index, $value)) {
+                    if (\is_array($value) && array_is_list($value) && \array_key_exists($index, $value)) {
                         $result[] = $value[$index];
-                    } else {
-                        // numeric index on a hashmap
-                        $keysIndices = array_keys($value);
-                        if (isset($keysIndices[$index]) && isset($value[$keysIndices[$index]])) {
-                            $result[] = $value[$keysIndices[$index]];
-                        }
                     }
                 }
             }
@@ -325,7 +513,11 @@ final class JsonCrawler implements JsonCrawlerInterface
         if (preg_match('/^([\'"])(.*)\1$/', $expr, $matches)) {
             $key = JsonPathUtils::unescapeString($matches[2], $matches[1]);
 
-            return \array_key_exists($key, $value) ? [$value[$key]] : [];
+            if (\is_array($value)) {
+                return [];
+            }
+
+            return $this->getValueIfKeyExists($value, $key);
         }
 
         throw new InvalidJsonPathException(\sprintf('Unsupported bracket expression "%s".', $expr));
@@ -333,7 +525,7 @@ final class JsonCrawler implements JsonCrawlerInterface
 
     private function evaluateFilter(string $expr, mixed $value): array
     {
-        if (!\is_array($value)) {
+        if (!$this->isArrayOrObject($value)) {
             return [];
         }
 
@@ -373,44 +565,48 @@ final class JsonCrawler implements JsonCrawlerInterface
             return !$this->evaluateFilterExpression(trim(substr($expr, 1)), $context);
         }
 
-        if (str_contains($expr, '&&')) {
-            $parts = array_map('trim', explode('&&', $expr));
-            foreach ($parts as $part) {
-                if (!$this->evaluateFilterExpression($part, $context)) {
-                    return false;
-                }
+        if ($logicalOp = $this->findRightmostLogicalOperator($expr)) {
+            $left = trim(substr($expr, 0, $logicalOp['position']));
+            $right = trim(substr($expr, $logicalOp['position'] + \strlen($logicalOp['operator'])));
+
+            if ('||' === $logicalOp['operator']) {
+                return $this->evaluateFilterExpression($left, $context) || $this->evaluateFilterExpression($right, $context);
             }
 
-            return true;
+            return $this->evaluateFilterExpression($left, $context) && $this->evaluateFilterExpression($right, $context);
         }
 
-        if (str_contains($expr, '||')) {
-            $parts = array_map('trim', explode('||', $expr));
-            $result = false;
-            foreach ($parts as $part) {
-                $result = $result || $this->evaluateFilterExpression($part, $context);
-            }
-
-            return $result;
-        }
-
-        $operators = ['!=', '==', '>=', '<=', '>', '<'];
-        foreach ($operators as $op) {
+        foreach (self::COMPARISON_OPERATORS as $op => $len) {
             if (str_contains($expr, $op)) {
-                [$left, $right] = array_map('trim', explode($op, $expr, 2));
-                $leftValue = $this->evaluateScalar($left, $context);
-                $rightValue = $this->evaluateScalar($right, $context);
+                if (false === $opPos = $this->findOperatorPosition($expr, $op)) {
+                    continue;
+                }
+
+                $leftValue = $this->evaluateScalar(trim(substr($expr, 0, $opPos)), $context);
+                $rightValue = $this->evaluateScalar(trim(substr($expr, $opPos + $len)), $context);
 
                 return $this->compare($leftValue, $rightValue, $op);
             }
         }
 
-        if ('@' === $expr) {
+        if ('@' === $expr || '$' === $expr) {
             return true;
         }
 
+        if (str_starts_with($expr, '$')) {
+            try {
+                return (bool) $this->evaluate(new JsonPath($expr));
+            } catch (JsonCrawlerException) {
+                return false;
+            }
+        }
+
         if (str_starts_with($expr, '@.')) {
-            return (bool) ($this->evaluateTokensOnDecodedData(JsonPathTokenizer::tokenize(new JsonPath('$'.substr($expr, 1))), $context)[0] ?? false);
+            return $this->isArrayOrObject($context) && $this->evaluateTokensOnDecodedData(JsonPathTokenizer::tokenize(new JsonPath('$'.substr($expr, 1))), $context);
+        }
+
+        if (str_starts_with($expr, '@[') && str_ends_with($expr, ']')) {
+            return $this->isArrayOrObject($context) && $this->evaluateBracket(substr($expr, 2, -1), $context);
         }
 
         // function calls
@@ -426,6 +622,47 @@ final class JsonCrawler implements JsonCrawlerInterface
         }
 
         return false;
+    }
+
+    private function findRightmostLogicalOperator(string $expr): ?array
+    {
+        $rightmostPos = -1;
+        $rightmostOp = null;
+        $depth = 0;
+        $exprLen = \strlen($expr);
+
+        for ($i = 0; $i < $exprLen; ++$i) {
+            $char = $expr[$i];
+
+            if ('(' === $char) {
+                ++$depth;
+            } elseif (')' === $char) {
+                --$depth;
+            } elseif (0 === $depth && '||' === substr($expr, $i, 2)) {
+                $rightmostPos = $i;
+                $rightmostOp = '||';
+                ++$i;
+            }
+        }
+
+        if (!$rightmostOp) {
+            $depth = 0;
+            for ($i = 0; $i < $exprLen; ++$i) {
+                $char = $expr[$i];
+
+                if ('(' === $char) {
+                    ++$depth;
+                } elseif (')' === $char) {
+                    --$depth;
+                } elseif (0 === $depth && '&&' === substr($expr, $i, 2)) {
+                    $rightmostPos = $i;
+                    $rightmostOp = '&&';
+                    ++$i;
+                }
+            }
+        }
+
+        return $rightmostOp ? ['operator' => $rightmostOp, 'position' => $rightmostPos] : null;
     }
 
     private function evaluateScalar(string $expr, mixed $context): mixed
@@ -462,13 +699,33 @@ final class JsonCrawler implements JsonCrawlerInterface
             return JsonPathUtils::unescapeString($matches[2], $matches[1]);
         }
 
+        // absolute path references
+        if (str_starts_with($expr, '$')) {
+            if ($this->isNonSingularQuery($expr)) {
+                throw new JsonCrawlerException($expr, 'non-singular query is not comparable');
+            }
+
+            return $this->evaluate(new JsonPath($expr))[0] ?? null;
+        }
+
         // current node references
         if (str_starts_with($expr, '@')) {
-            if (!\is_array($context)) {
+            if (!$this->isArrayOrObject($context)) {
                 return null;
             }
 
-            return $this->evaluateTokensOnDecodedData(JsonPathTokenizer::tokenize(new JsonPath('$'.substr($expr, 1))), $context)[0] ?? null;
+            $path = substr($expr, 1);
+
+            if (str_starts_with($path, '[') && str_ends_with($path, ']')) {
+                $bracketContent = substr($path, 1, -1);
+                $result = $this->evaluateBracket($bracketContent, $context);
+
+                return $result ? $result[0] : self::nothing();
+            }
+
+            $results = $this->evaluateTokensOnDecodedData(JsonPathTokenizer::tokenize(new JsonPath('$'.$path)), $context);
+
+            return $results ? $results[0] : self::nothing();
         }
 
         // function calls
@@ -501,7 +758,7 @@ final class JsonCrawler implements JsonCrawlerInterface
                 } elseif ('@' === $arg) {
                     $argList[] = $context;
                     $nodelistSizes[] = 1;
-                } elseif (!\is_array($context)) {
+                } elseif (!$this->isArrayOrObject($context)) {
                     $argList[] = null;
                     $nodelistSizes[] = 0;
                 } elseif (str_starts_with($pathPart = substr($arg, 1), '[')) {
@@ -525,7 +782,8 @@ final class JsonCrawler implements JsonCrawlerInterface
             'length' => match (true) {
                 \is_string($value) => mb_strlen($value),
                 \is_array($value) => \count($value),
-                default => 0,
+                $value instanceof \stdClass => \count(get_object_vars($value)),
+                default => self::nothing(),
             },
             'count' => $nodelistSize,
             'match' => match (true) {
@@ -536,21 +794,25 @@ final class JsonCrawler implements JsonCrawlerInterface
                 \is_string($value) && \is_string($argList[1] ?? null) => (bool) @preg_match("/{$this->transformJsonPathRegex($argList[1])}/u", $value),
                 default => false,
             },
-            'value' => 1 < $nodelistSize ? null : (1 === $nodelistSize ? (\is_array($value) ? ($value[0] ?? null) : $value) : $value),
+            'value' => 1 < $nodelistSize ? self::nothing() : (1 === $nodelistSize ? (\is_array($value) ? ($value[0] ?? null) : $value) : $value),
             default => null,
         };
     }
 
     private function evaluateRecursive(mixed $value): array
     {
-        if (!\is_array($value)) {
+        if (!$this->isArrayOrObject($value)) {
             return [];
         }
 
-        $result = [$value];
+        $result = [];
+
+        $result[] = $value;
+
         foreach ($value as $item) {
-            if (\is_array($item)) {
-                $result = array_merge($result, $this->evaluateRecursive($item));
+            if ($this->isArrayOrObject($item)) {
+                $childResults = $this->evaluateRecursive($item);
+                $result = array_merge($result, $childResults);
             }
         }
 
@@ -560,61 +822,292 @@ final class JsonCrawler implements JsonCrawlerInterface
     private function compare(mixed $left, mixed $right, string $operator): bool
     {
         return match ($operator) {
-            '==' => $left === $right,
-            '!=' => $left !== $right,
-            '>' => $left > $right,
-            '>=' => $left >= $right,
-            '<' => $left < $right,
-            '<=' => $left <= $right,
+            '==' => $this->compareEquality($left, $right),
+            '!=' => !$this->compareEquality($left, $right),
+            '>', '>=', '<', '<=' => $this->compareOrdering($left, $right, $operator),
             default => false,
         };
     }
 
+    private function compareEquality(mixed $left, mixed $right): bool
+    {
+        $leftIsNothing = $left === self::nothing();
+        $rightIsNothing = $right === self::nothing();
+
+        if (
+            $leftIsNothing && $rightIsNothing
+            || ($leftIsNothing && 0 === $right || 0 === $left && $rightIsNothing)
+        ) {
+            return true;
+        }
+
+        if ($leftIsNothing || $rightIsNothing) {
+            return false;
+        }
+
+        if ((\is_int($left) || \is_float($left)) && (\is_int($right) || \is_float($right))) {
+            return $left == $right;
+        }
+
+        if (\is_string($left) && \is_string($right) || \is_bool($left) && \is_bool($right)) {
+            return $left === $right;
+        }
+
+        if (null === $left && null === $right) {
+            return true;
+        }
+
+        // arrays must have equal length and equal corresponding elements
+        if (\is_array($left) && \is_array($right)) {
+            return $this->compareArraysDeep($left, $right);
+        }
+
+        // objects must have identical names and equal corresponding values
+        if ($left instanceof \stdClass && $right instanceof \stdClass) {
+            return $this->compareObjectsDeep($left, $right);
+        }
+
+        // null (missing property) equals 0 when compared to function results
+        if (null === $left && 0 === $right || 0 === $left && null === $right) {
+            return true;
+        }
+
+        // different types are not equal
+        return false;
+    }
+
+    private function compareArraysDeep(array $left, array $right): bool
+    {
+        $leftIsList = array_is_list($left);
+        $rightIsList = array_is_list($right);
+        $leftCount = \count($left);
+
+        if ($leftIsList !== $rightIsList || $leftCount !== \count($right)) {
+            return false;
+        }
+
+        foreach ($left as $key => $value) {
+            if (!\array_key_exists($key, $right) || !$this->compareEquality($value, $right[$key])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function compareObjectsDeep(\stdClass $left, \stdClass $right): bool
+    {
+        $leftVars = get_object_vars($left);
+        $rightVars = get_object_vars($right);
+
+        if (\count($leftVars) !== \count($rightVars)) {
+            return false;
+        }
+
+        foreach ($leftVars as $key => $value) {
+            if (!property_exists($right, $key) || !$this->compareEquality($value, $rightVars[$key])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function compareOrdering(mixed $left, mixed $right, string $operator): bool
+    {
+        if (null === $left || null === $right) {
+            return match ($operator) {
+                '>=', '<=' => $left === $right,
+                default => false,
+            };
+        }
+
+        if ((\is_int($left) || \is_float($left)) && (\is_int($right) || \is_float($right)) || \is_bool($left) && \is_bool($right)) {
+            $comparison = $left - $right;
+        } elseif (\is_string($left) && \is_string($right)) {
+            $comparison = strcmp($left, $right);
+        } else {
+            return false;
+        }
+
+        return match ($operator) {
+            '>' => $comparison > 0,
+            '>=' => $comparison >= 0,
+            '<' => $comparison < 0,
+            '<=' => $comparison <= 0,
+            default => false,
+        };
+    }
+
+    private function isNonSingularQuery(string $expr): bool
+    {
+        try {
+            $tokens = JsonPathTokenizer::tokenize(new JsonPath($expr));
+
+            foreach ($tokens as $token) {
+                if (TokenType::Bracket === $token->type) {
+                    $trimmedValue = trim($token->value);
+
+                    if (
+                        str_contains($token->value, ',')
+                        || '*' === $trimmedValue
+                        || preg_match('/^(-?\d*+)\s*+:\s*+(-?\d*+)(?:\s*+:\s*+(-?\d*+))?$/', $trimmedValue)
+                    ) {
+                        return true;
+                    }
+                }
+
+                if (TokenType::Name === $token->type && '*' === $token->value || TokenType::Recursive === $token->type) {
+                    return true;
+                }
+            }
+
+            return false;
+        } catch (InvalidJsonPathException) {
+            return true;
+        }
+    }
+
+    private function isNonSingularRelativeQuery(string $expr): bool
+    {
+        return preg_match('/@\[.*,.*]/', $expr) || '@.*' === $expr || preg_match('/@\[.*:.*]/', $expr);
+    }
+
+    private function findOperatorPosition(string $expr, string $op): int|false
+    {
+        $bracketDepth = 0;
+        $parenthesisDepth = 0;
+        $length = \strlen($expr);
+        $opLength = \strlen($op);
+
+        for ($i = 0; $i <= $length - $opLength; ++$i) {
+            $char = $expr[$i];
+
+            if ('[' === $char) {
+                ++$bracketDepth;
+            } elseif (']' === $char) {
+                --$bracketDepth;
+            } elseif ('(' === $char) {
+                ++$parenthesisDepth;
+            } elseif (')' === $char) {
+                --$parenthesisDepth;
+            } elseif (!$bracketDepth && !$parenthesisDepth && substr($expr, $i, $opLength) === $op) {
+                return $i;
+            }
+        }
+
+        return false;
+    }
+
+    private function validateFilterExpression(string $expr): void
+    {
+        if ($logicalOp = $this->findRightmostLogicalOperator($expr)) {
+            $this->validateFilterExpression(trim(substr($expr, 0, $logicalOp['position']))); // left
+            $this->validateFilterExpression(trim(substr($expr, $logicalOp['position'] + \strlen($logicalOp['operator'])))); // right
+
+            return;
+        }
+
+        foreach (self::COMPARISON_OPERATORS as $op => $len) {
+            if (str_contains($expr, $op)) {
+                if (false === $opPos = $this->findOperatorPosition($expr, $op)) {
+                    continue;
+                }
+
+                $left = trim(substr($expr, 0, $opPos));
+                $right = trim(substr($expr, $opPos + $len));
+
+                if (
+                    str_starts_with($left, '$') && $this->isNonSingularQuery($left)
+                    || str_starts_with($right, '$') && $this->isNonSingularQuery($right)
+                ) {
+                    throw new JsonCrawlerException($left, 'non-singular query is not comparable');
+                }
+
+                if (
+                    str_starts_with($left, '@') && $this->isNonSingularRelativeQuery($left)
+                    || str_starts_with($right, '@') && $this->isNonSingularRelativeQuery($right)
+                ) {
+                    throw new JsonCrawlerException($left, 'non-singular query is not comparable');
+                }
+
+                return;
+            }
+        }
+    }
+
     /**
-     * Transforms JSONPath regex patterns to comply with RFC 9535.
+     * Transforms JSONPath regex patterns to comply with RFC 9485.
      *
-     * The main issue is that '.' should not match \r or \n but should
-     * match Unicode line separators U+2028 and U+2029.
+     * @see https://www.rfc-editor.org/rfc/rfc9485.html#name-pcre-re2-and-ruby-regexps
      */
     private function transformJsonPathRegex(string $pattern): string
     {
         $result = '';
         $inCharClass = false;
-        $escaped = false;
         $i = -1;
 
         while (null !== $char = $pattern[++$i] ?? null) {
-            if ($escaped) {
-                $result .= $char;
-                $escaped = false;
-                continue;
+            switch ($char) {
+                case '\\': $char .= $pattern[++$i] ?? '';
+                    break;
+                case '[': $inCharClass = true;
+                    break;
+                case ']': $inCharClass = false;
+                    break;
+                case '.': $inCharClass || $char = '[^\r\n]';
+                    break;
             }
 
-            if ('\\' === $char) {
-                $result .= $char;
-                $escaped = true;
-                continue;
-            }
-
-            if ('[' === $char && !$inCharClass) {
-                $inCharClass = true;
-                $result .= $char;
-                continue;
-            }
-
-            if (']' === $char && $inCharClass) {
-                $inCharClass = false;
-                $result .= $char;
-                continue;
-            }
-
-            if ('.' === $char && !$inCharClass) {
-                $result .= '(?:[^\r\n]|\x{2028}|\x{2029})';
-            } else {
-                $result .= $char;
-            }
+            $result .= $char;
         }
 
         return $result;
+    }
+
+    private function isArrayOrObject(mixed $value): bool
+    {
+        return \is_array($value) || $value instanceof \stdClass;
+    }
+
+    private function normalizeStorage(\stdClass|array $data): array
+    {
+        return array_map(function ($value) {
+            return $value instanceof \stdClass || $value && \is_array($value) ? self::normalizeStorage($value) : $value;
+        }, (array) $data);
+    }
+
+    private function isValidMixedBracketExpression(string $expr): bool
+    {
+        $parts = JsonPathUtils::parseCommaSeparatedValues($expr);
+        $hasFilter = false;
+        $validMixed = true;
+
+        foreach ($parts as $part) {
+            $part = trim($part);
+            if (preg_match('/^\?/', $part)) {
+                $hasFilter = true;
+                // complete filter expression and not part of a comparison?
+                if (!preg_match('/^\?[^?]*$/', $part)) {
+                    $validMixed = false;
+                    break;
+                }
+            } elseif (!preg_match('/^(\*|-?\d+|-?\d*:-?\d*(?::-?\d+)?|[\'"].*[\'"])$/', $part)) { // is it a valid non-filter selector (index, wildcard, slice)?
+                $validMixed = false;
+                break;
+            }
+        }
+
+        return $hasFilter && $validMixed && 1 < \count($parts);
+    }
+
+    private static function nothing(): \stdClass
+    {
+        return self::$nothing ??= new \stdClass();
+    }
+
+    private function getValueIfKeyExists(mixed $value, string $key): array
+    {
+        return $this->isArrayOrObject($value) && \array_key_exists($key, $arrayValue = (array) $value) ? [$arrayValue[$key]] : [];
     }
 }

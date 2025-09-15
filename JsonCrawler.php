@@ -720,12 +720,12 @@ final class JsonCrawler implements JsonCrawlerInterface
                 $bracketContent = substr($path, 1, -1);
                 $result = $this->evaluateBracket($bracketContent, $context);
 
-                return $result ? $result[0] : self::nothing();
+                return $result ? $result[0] : Nothing::Nothing;
             }
 
             $results = $this->evaluateTokensOnDecodedData(JsonPathTokenizer::tokenize(new JsonPath('$'.$path)), $context);
 
-            return $results ? $results[0] : self::nothing();
+            return $results ? $results[0] : Nothing::Nothing;
         }
 
         // function calls
@@ -783,7 +783,7 @@ final class JsonCrawler implements JsonCrawlerInterface
                 \is_string($value) => mb_strlen($value),
                 \is_array($value) => \count($value),
                 $value instanceof \stdClass => \count(get_object_vars($value)),
-                default => self::nothing(),
+                default => Nothing::Nothing,
             },
             'count' => $nodelistSize,
             'match' => match (true) {
@@ -794,7 +794,7 @@ final class JsonCrawler implements JsonCrawlerInterface
                 \is_string($value) && \is_string($argList[1] ?? null) => (bool) @preg_match("/{$this->transformJsonPathRegex($argList[1])}/u", $value),
                 default => false,
             },
-            'value' => 1 < $nodelistSize ? self::nothing() : (1 === $nodelistSize ? (\is_array($value) ? ($value[0] ?? null) : $value) : $value),
+            'value' => 1 < $nodelistSize ? Nothing::Nothing : (1 === $nodelistSize ? (\is_array($value) ? ($value[0] ?? null) : $value) : $value),
             default => null,
         };
     }
@@ -831,8 +831,8 @@ final class JsonCrawler implements JsonCrawlerInterface
 
     private function compareEquality(mixed $left, mixed $right): bool
     {
-        $leftIsNothing = $left === self::nothing();
-        $rightIsNothing = $right === self::nothing();
+        $leftIsNothing = $left === Nothing::Nothing;
+        $rightIsNothing = $right === Nothing::Nothing;
 
         if (
             $leftIsNothing && $rightIsNothing
@@ -1099,11 +1099,6 @@ final class JsonCrawler implements JsonCrawlerInterface
         }
 
         return $hasFilter && $validMixed && 1 < \count($parts);
-    }
-
-    private static function nothing(): \stdClass
-    {
-        return self::$nothing ??= new \stdClass();
     }
 
     private function getValueIfKeyExists(mixed $value, string $key): array

@@ -32,8 +32,6 @@ use Symfony\Component\JsonStreamer\Read\Splitter;
  */
 final class JsonCrawler implements JsonCrawlerInterface
 {
-    private static \stdClass $nothing;
-
     private const RFC9535_FUNCTIONS = [
         'length' => true,
         'count' => true,
@@ -833,8 +831,8 @@ final class JsonCrawler implements JsonCrawlerInterface
 
     private function compareEquality(mixed $left, mixed $right): bool
     {
-        $leftIsNothing = $left === Nothing::Nothing;
-        $rightIsNothing = $right === Nothing::Nothing;
+        $leftIsNothing = Nothing::Nothing === $left;
+        $rightIsNothing = Nothing::Nothing === $right;
 
         if (
             $leftIsNothing && $rightIsNothing

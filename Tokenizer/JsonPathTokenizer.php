@@ -355,7 +355,7 @@ final class JsonPathTokenizer
         $filterExpr = ltrim($expr, '?');
         $filterExpr = trim($filterExpr);
 
-        if (preg_match('/\b(True|False|Null)\b/', $filterExpr)) {
+        if (preg_match('/(?<!["\'])\b(True|False|Null)\b(?!["\'])/', $filterExpr)) {
             throw new InvalidJsonPathException('Incorrectly capitalized literal in filter expression.', $position);
         }
 

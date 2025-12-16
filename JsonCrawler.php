@@ -1101,7 +1101,7 @@ final class JsonCrawler implements JsonCrawlerInterface
     private function normalizeStorage(\stdClass|array $data): array
     {
         return array_map(function ($value) {
-            return $value instanceof \stdClass || $value && \is_array($value) ? self::normalizeStorage($value) : $value;
+            return $value instanceof \stdClass || $value && \is_array($value) ? $this->normalizeStorage($value) : $value;
         }, (array) $data);
     }
 

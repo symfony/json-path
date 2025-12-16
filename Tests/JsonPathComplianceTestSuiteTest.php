@@ -93,7 +93,7 @@ final class JsonPathComplianceTestSuiteTest extends TestCase
     private static function convertToArray(mixed $value): mixed
     {
         if ($value instanceof \stdClass) {
-            return array_map(function ($val) {
+            return array_map(static function ($val) {
                 return self::convertToArray($val);
             }, get_object_vars($value));
         }

@@ -1096,9 +1096,7 @@ final class JsonCrawler implements JsonCrawlerInterface
 
     private function normalizeStorage(\stdClass|array $data): array
     {
-        return array_map(function ($value) {
-            return $value instanceof \stdClass || $value && \is_array($value) ? $this->normalizeStorage($value) : $value;
-        }, (array) $data);
+        return array_map(fn ($value) => $value instanceof \stdClass || $value && \is_array($value) ? $this->normalizeStorage($value) : $value, (array) $data);
     }
 
     private function isValidMixedBracketExpression(string $expr): bool

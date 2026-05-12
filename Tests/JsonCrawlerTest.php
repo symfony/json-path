@@ -431,6 +431,18 @@ class JsonCrawlerTest extends TestCase
         $this->assertSame('Sayings of the Century', $result[0]['title']);
     }
 
+    public function testSearchFunctionDoesNotHangOnPathologicalRegex()
+    {
+        $crawler = new JsonCrawler(json_encode(['items' => [str_repeat('a', 40).'!']]));
+
+        $start = microtime(true);
+        $result = $crawler->find('$.items[?search(@, "(a+)+$")]');
+        $elapsed = microtime(true) - $start;
+
+        $this->assertSame([], $result);
+        $this->assertLessThan(1.0, $elapsed, 'ReDoS pattern must not stall preg_match');
+    }
+
     public function testDeepExpressionInFilter()
     {
         $result = self::getBookstoreCrawler()->find('$.store.book[?(@.publisher.address.city == "Springfield")]');

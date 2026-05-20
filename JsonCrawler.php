@@ -32,6 +32,11 @@ use Symfony\Contracts\Service\ServiceProviderInterface;
  */
 final class JsonCrawler implements JsonCrawlerInterface
 {
+    private const REGEX_BACKTRACK_LIMIT = 10000;
+
+    /**
+     * Comparison operators and their corresponding lengths.
+     */
     private const COMPARISON_OPERATORS = [
         '!=' => 2,
         '==' => 2,
@@ -770,11 +775,11 @@ final class JsonCrawler implements JsonCrawlerInterface
             },
             'count' => $nodelistSize,
             'match' => match (true) {
-                \is_string($value) && \is_string($argList[1] ?? null) => (bool) @preg_match(\sprintf('/^%s$/u', $this->transformJsonPathRegex($argList[1])), $value),
+                \is_string($value) && \is_string($argList[1] ?? null) => $this->safeRegexMatch(\sprintf('/^%s$/u', $this->transformJsonPathRegex($argList[1])), $value),
                 default => false,
             },
             'search' => match (true) {
-                \is_string($value) && \is_string($argList[1] ?? null) => (bool) @preg_match("/{$this->transformJsonPathRegex($argList[1])}/u", $value),
+                \is_string($value) && \is_string($argList[1] ?? null) => $this->safeRegexMatch("/{$this->transformJsonPathRegex($argList[1])}/u", $value),
                 default => false,
             },
             'value' => 1 < $nodelistSize ? Nothing::Nothing : (1 === $nodelistSize ? (\is_array($value) ? ($value[0] ?? null) : $value) : $value),
@@ -1081,6 +1086,18 @@ final class JsonCrawler implements JsonCrawlerInterface
         }
 
         throw new JsonCrawlerException($expr, \sprintf('the result of the custom JsonPath function "%s" (%s) cannot be used in test expressions', $functionName, $returnType->name.'Type'));
+    }
+
+    private function safeRegexMatch(string $pattern, string $subject): bool
+    {
+        $previousLimit = ini_set('pcre.backtrack_limit', self::REGEX_BACKTRACK_LIMIT);
+        try {
+            return @preg_match($pattern, $subject);
+        } finally {
+            if (false !== $previousLimit) {
+                ini_set('pcre.backtrack_limit', $previousLimit);
+            }
+        }
     }
 
     /**

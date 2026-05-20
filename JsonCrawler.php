@@ -40,6 +40,8 @@ final class JsonCrawler implements JsonCrawlerInterface
 
     private const SINGULAR_ARGUMENT_FUNCTIONS = ['length', 'match', 'search'];
 
+    private const REGEX_BACKTRACK_LIMIT = 10000;
+
     /**
      * Comparison operators and their corresponding lengths.
      */
@@ -791,11 +793,11 @@ final class JsonCrawler implements JsonCrawlerInterface
             },
             'count' => $nodelistSize,
             'match' => match (true) {
-                \is_string($value) && \is_string($argList[1] ?? null) => (bool) @preg_match(\sprintf('/^%s$/u', $this->transformJsonPathRegex($argList[1])), $value),
+                \is_string($value) && \is_string($argList[1] ?? null) => $this->safeRegexMatch(\sprintf('/^%s$/u', $this->transformJsonPathRegex($argList[1])), $value),
                 default => false,
             },
             'search' => match (true) {
-                \is_string($value) && \is_string($argList[1] ?? null) => (bool) @preg_match("/{$this->transformJsonPathRegex($argList[1])}/u", $value),
+                \is_string($value) && \is_string($argList[1] ?? null) => $this->safeRegexMatch("/{$this->transformJsonPathRegex($argList[1])}/u", $value),
                 default => false,
             },
             'value' => 1 < $nodelistSize ? Nothing::Nothing : (1 === $nodelistSize ? (\is_array($value) ? ($value[0] ?? null) : $value) : $value),
@@ -1057,6 +1059,18 @@ final class JsonCrawler implements JsonCrawlerInterface
         $arg = trim($matches[2]);
         if (str_starts_with($arg, '@') && $this->isNonSingularRelativeQuery($arg)) {
             throw new JsonCrawlerException($arg, \sprintf('non-singular query is not allowed as argument to "%s" function', $functionName));
+        }
+    }
+
+    private function safeRegexMatch(string $pattern, string $subject): bool
+    {
+        $previousLimit = ini_set('pcre.backtrack_limit', self::REGEX_BACKTRACK_LIMIT);
+        try {
+            return @preg_match($pattern, $subject);
+        } finally {
+            if (false !== $previousLimit) {
+                ini_set('pcre.backtrack_limit', $previousLimit);
+            }
         }
     }
 
